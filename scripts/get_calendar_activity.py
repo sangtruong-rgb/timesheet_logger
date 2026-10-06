@@ -4,8 +4,8 @@ get_calendar_activity.py - Deterministic collector and adapter for Google Calend
 
 Retrieves events for the requested day:
 - title
-- start (ISO 8601 with timezone)
-- end (ISO 8601 with timezone)
+- timed start/end (ISO 8601 with timezone), retaining original event extent
+- all-day start/end dates (exclusive end), marked all_day and kept as context
 
 Uses an existing authorized-user Google token or an explicitly selected fixture.
 Outputs a source-status envelope; never substitutes fixtures for live results.
@@ -85,18 +85,38 @@ def fetch_google_calendar_events(
             raise ValueError("Invalid Calendar events response")
         events = []
         for it in items:
-            start_dt = parse_event_time(it.get("start"), tz)
-            end_dt = parse_event_time(it.get("end"), tz)
-            if not start_dt or not end_dt:
-                raise ValueError("Invalid Calendar event times")
-            events.append({
-                "title": it.get("summary", "Untitled event"),
-                "start": start_dt.isoformat(),
-                "end": end_dt.isoformat()
-            })
+            event = normalize_calendar_event(it, target_date, tz)
+            if event is not None:
+                events.append(event)
         return events
     except ImportError as exc:
         raise SourceUnavailable("Install google-auth and google-api-python-client for live Calendar") from exc
+
+
+def normalize_calendar_event(item, target_date, tz):
+    """Keep all-day dates distinct; select both adapters by half-open day overlap."""
+    def is_date(value):
+        return (isinstance(value, dict) and "date" in value and "dateTime" not in value
+                or isinstance(value, str) and len(value) == 10)
+
+    start, end = item.get("start"), item.get("end")
+    all_day = is_date(start)
+    if is_date(end) != all_day or item.get("all_day", all_day) != all_day:
+        raise ValueError("Calendar dates/times and all_day flag must agree")
+    s, e = parse_event_time(start, tz), parse_event_time(end, tz)
+    if not s or not e or e <= s:
+        raise ValueError("Calendar requires valid start and end after start")
+    title = item.get("summary", item.get("title", "Untitled event"))
+    if all_day:
+        if not s.date() <= target_date < e.date():
+            return None
+        return {"title": title, "start": s.date().isoformat(), "end": e.date().isoformat(), "all_day": True}
+    day_start = datetime.datetime.combine(target_date, datetime.time.min, tzinfo=tz)
+    day_end = datetime.datetime.combine(target_date + datetime.timedelta(days=1), datetime.time.min, tzinfo=tz)
+    if s >= day_end or e <= day_start:
+        return None
+    # Original event extent is retained; daily clipping happens in block construction.
+    return {"title": title, "start": s.isoformat(), "end": e.isoformat()}
 
 
 def load_calendar_fixture(fixture_path: str, target_date: datetime.date, tz=None) -> List[Dict[str, Any]]:
@@ -105,16 +125,9 @@ def load_calendar_fixture(fixture_path: str, target_date: datetime.date, tz=None
     data = load_fixture_records(fixture_path)
     events = []
     for item in data:
-        start_dt = parse_event_time(item.get("start"), tz)
-        end_dt = parse_event_time(item.get("end"), tz)
-        if not start_dt or not end_dt:
-            raise ValueError("Calendar fixture records require valid start and end")
-        if start_dt.date() == target_date:
-            events.append({
-                "title": item.get("title", "Untitled event"),
-                "start": start_dt.isoformat(),
-                "end": end_dt.isoformat()
-            })
+        event = normalize_calendar_event(item, target_date, tz)
+        if event is not None:
+            events.append(event)
     events.sort(key=lambda e: e["start"])
     return events
 

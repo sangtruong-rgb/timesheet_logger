@@ -70,14 +70,16 @@ def clean_calendar(raw_events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         title = str(ev.get("title", "")).strip()
         start = str(ev.get("start", "")).strip()
         end = str(ev.get("end", "")).strip()
-        key = (title, start, end)
+        all_day = ev.get("all_day", len(start) == 10 and len(end) == 10)
+        key = (title, start, end, all_day)
         if key in seen_events:
             continue
         seen_events.add(key)
         cleaned.append({
             "title": title,
             "start": start,
-            "end": end
+            "end": end,
+            **({"all_day": True} if all_day else {})
         })
     cleaned.sort(key=lambda x: x.get("start", ""))
     return cleaned
@@ -90,10 +92,12 @@ def normalize_all(
     calendar: List[Dict[str, Any]],
     timezone_str: Optional[str] = None
 ) -> Dict[str, Any]:
+    events = clean_calendar(calendar)
     return {
         "date": target_date,
         "timezone": timezone_str or get_local_timezone_str(),
-        "calendar": clean_calendar(calendar),
+        "calendar": [ev for ev in events if not ev.get("all_day")],
+        "calendar_context": [ev for ev in events if ev.get("all_day")],
         "commits": clean_commits(commits),
         "pull_requests": clean_prs(prs)
     }

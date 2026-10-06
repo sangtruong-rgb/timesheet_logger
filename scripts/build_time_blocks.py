@@ -7,6 +7,8 @@ Rules:
    - Calendar events define explicit blocks (meetings, stand-ups, focus time).
    - Overlapping events are partitioned into disjoint intervals with all sources;
      overlap requires attendance review, not an assumption of attendance.
+   - Timed events are clipped to the selected local day; midnight end is 24:00.
+     All-day events belong to audit context and never form timed work blocks.
    - Development gaps require a timestamped commit/PR inside their interval.
      These durations are estimated, not proof of continuous work.
    - All development gaps exclude 12:00–13:30 before checking activity.
@@ -26,6 +28,8 @@ import json
 import sys
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from block_identity import BlockIdentityError
 
 
 def parse_dt(ts_str: str) -> Optional[datetime.datetime]:
@@ -42,7 +46,7 @@ def format_hhmm(dt: datetime.datetime) -> str:
 
 
 def calculate_minutes(start_dt: datetime.datetime, end_dt: datetime.datetime) -> int:
-    delta = end_dt - start_dt
+    delta = end_dt.astimezone(datetime.timezone.utc) - start_dt.astimezone(datetime.timezone.utc)
     return max(0, int(delta.total_seconds() // 60))
 
 
@@ -50,7 +54,8 @@ def build_time_blocks(normalized_data: Dict[str, Any]) -> List[Dict[str, Any]]:
     target_date_str = normalized_data.get("date", "")
     target_date = datetime.date.fromisoformat(target_date_str) if target_date_str else datetime.date.today()
 
-    calendar = normalized_data.get("calendar", [])
+    calendar = [ev for ev in normalized_data.get("calendar", [])
+                if not ev.get("all_day") and not (len(ev.get("start", "")) == 10 and len(ev.get("end", "")) == 10)]
     commits = normalized_data.get("commits", [])
     # Associate each actual action at its own time, then deduplicate references
     # within each block. One PR may legitimately have actions in two blocks.
@@ -69,6 +74,28 @@ def build_time_blocks(normalized_data: Dict[str, Any]) -> List[Dict[str, Any]]:
         tz = parse_dt(calendar[0]["start"]).tzinfo or tz
     elif commits and parse_dt(commits[0].get("timestamp")):
         tz = parse_dt(commits[0]["timestamp"]).tzinfo or tz
+    if normalized_data.get("timezone"):
+        value = normalized_data["timezone"]
+        try:
+            tz = ZoneInfo(value)
+        except (ZoneInfoNotFoundError, TypeError, ValueError):
+            try:
+                tz = datetime.datetime.fromisoformat("2000-01-01T00:00:00" + value).tzinfo
+                if tz is None:
+                    raise ValueError("Missing timezone")
+            except (TypeError, ValueError) as exc:
+                raise BlockIdentityError("Daily Calendar scope requires an IANA zone or UTC offset") from exc
+    daily_start = datetime.datetime.combine(target_date, datetime.time.min, tzinfo=tz)
+    daily_end = datetime.datetime.combine(target_date + datetime.timedelta(days=1), datetime.time.min, tzinfo=tz)
+    # Keep original source extents, but construct blocks only for the target day.
+    scoped_calendar = []
+    for ev in calendar:
+        s, e = parse_dt(ev.get("start")), parse_dt(ev.get("end"))
+        if not s or not e or s.tzinfo is None or e.tzinfo is None or e <= s:
+            raise BlockIdentityError("Daily Calendar scope requires aware timestamps and end after start")
+        if s < daily_end and e > daily_start:
+            scoped_calendar.append(ev)
+    calendar = scoped_calendar
 
     blocks: List[Dict[str, Any]] = []
     block_bounds = []
@@ -82,8 +109,6 @@ def build_time_blocks(normalized_data: Dict[str, Any]) -> List[Dict[str, Any]]:
 
     # CASE A: Calendar events exist
     if calendar:
-        valid_events = [e for e in calendar if parse_dt(e.get("start")) and parse_dt(e.get("end"))]
-
         # Standard bounds
         day_start = datetime.datetime.combine(target_date, datetime.time(9, 0), tzinfo=tz)
         lunch_start = datetime.datetime.combine(target_date, datetime.time(12, 0), tzinfo=tz)
@@ -92,13 +117,11 @@ def build_time_blocks(normalized_data: Dict[str, Any]) -> List[Dict[str, Any]]:
 
         # Partition at event boundaries; each minute has one set of active sources.
         event_bounds = []
-        for ev in valid_events:
+        for ev in calendar:
             s = parse_dt(ev["start"])
             e = parse_dt(ev["end"])
-            if s.tzinfo is None or e.tzinfo is None or e <= s:
-                from block_identity import BlockIdentityError
-                raise BlockIdentityError("Calendar partitioning requires aware timestamps and end after start")
             s, e = s.astimezone(tz), e.astimezone(tz)
+            s, e = max(s, daily_start), min(e, daily_end)
             event_bounds.append((s, e, ev))
         boundaries = sorted({time for s, e, _ in event_bounds for time in (s, e)})
         segments = []
@@ -160,7 +183,7 @@ def build_time_blocks(normalized_data: Dict[str, Any]) -> List[Dict[str, Any]]:
             blocks.append({
                 "date": target_date_str,
                 "start_time": format_hhmm(s_dt),
-                "end_time": format_hhmm(e_dt),
+                "end_time": "24:00" if e_dt == daily_end else format_hhmm(e_dt),
                 "duration_minutes": calculate_minutes(s_dt, e_dt),
                 "calendar_titles": item.get("calendar_titles", []),
                 **({"calendar_events": item["calendar_events"]} if not estimated else {}),

@@ -213,8 +213,33 @@ events overlapping lunch are retained whole. Lunch-only commit/PR evidence is
 preserved through the existing unmatched-activity fallback, whose routing remains
 F08. Lunch times are currently hardcoded; reading configurable workday settings
 remains D02. No-Calendar fallback is unchanged, including its morning-only
-`09:00–12:30` proposal; that inconsistency remains D02. All-day/cross-midnight
-handling remains F07.
+`09:00–12:30` proposal; that inconsistency remains D02.
+
+### All-day context and daily Calendar scope
+
+All-day events preserve `all_day: true` and their start/exclusive-end dates.
+They are separated into `calendar_context`, never added to work durations or AI
+time-block payloads. A deadline/holiday label alone does not establish hours worked
+or make the logger discard Git/PR activity. An all-day-only day has zero entries
+and zero minutes, with context shown below the Markdown timesheet and saved in
+`YYYY-MM-DD.calendar-context.json`. The source manifest links that file and reports
+the context count. Source Calendar count includes timed and all-day records.
+
+Live and explicit fixture adapters select events overlapping the requested day,
+including events beginning the previous night. Timed blocks are clipped to the
+selected timezone's half-open local day, retaining original normalized event
+boundaries in source evidence. An event 22:00–02:00 yields 22:00–24:00 on the first
+day and 00:00–02:00 on the next day, each 120 scheduled minutes. An explicit timed
+00:00–24:00 event remains timed; it is not guessed to be all-day. UTC elapsed minutes
+are used for durations across offset changes. Scheduled time does not confirm attendance.
+
+Context changes/deletions update the sidecar and Markdown on successful reruns.
+Source or validation failures preserve context alongside other final outputs.
+Standalone saving accepts `--calendar-context-file context-array.json`; omission
+preserves existing context and a supplied `[]` clears it. Demo context is isolated
+under demo/. Existing untyped midnight legacy files are not automatically migrated.
+Breaktime/OT classification, workday policy, wider Calendar filters/pagination,
+and transactional multi-file persistence remain separate audit work.
 
 ### Overlapping Calendar events
 

@@ -179,7 +179,7 @@ def run():
     from save_timesheet import save_timesheet, TimesheetReconciliationError
     try:
         save_result = save_timesheet(entries, str(output_dir), target_date=date_str,
-                                     collection_status=collection["status"])
+                                     collection_status=collection["status"], calendar_context=normalized["calendar_context"])
     except TimesheetReconciliationError as exc:
         draft = save_activity_draft(date_str, normalized, collection, output_dir, str(exc), entries)
         print(f"\n RECONCILIATION BLOCKED: {exc}", file=sys.stderr)
@@ -195,7 +195,11 @@ def run():
         print(f"   -> AI payload written to {ai_path}")
     output_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = output_dir / f"{date_str}.collection.json"
-    manifest_path.write_text(json.dumps({"date": date_str, **collection}, indent=2), encoding="utf-8")
+    info = save_result["dates"][date_str]
+    manifest_path.write_text(json.dumps({"date": date_str, **collection,
+        "calendar_context_count": len(normalized["calendar_context"]),
+        "calendar_context_file": Path(info["calendar_context_path"]).name if "calendar_context_path" in info else None
+    }, indent=2), encoding="utf-8")
 
     # Step 9: Token usage tracking
     print(">> [6/6] Checking token tracking...")
@@ -213,6 +217,8 @@ def run():
         info = save_result["dates"][date_str]
         print(f" Timesheet JSON: {info['json_path']}")
         print(f" Timesheet Markdown: {info['md_path']}")
+        if "calendar_context_path" in info:
+            print(f" Calendar context (not counted as work time): {info['calendar_context_path']}")
         print(f" Total Entries: {info['total_entries']} (Inserted: {info['inserted']}, Updated: {info['updated']}, "
               f"Removed: {info['removed']}, Manual preserved: {info['preserved_manual']}, Overridden: {info['overridden']})")
     return 0

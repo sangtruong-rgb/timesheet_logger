@@ -1,4 +1,4 @@
-"""F04–F06 assembly with synthetic collector responses, real block/storage code."""
+"""F04–F07 assembly with synthetic collector responses, real block/storage code."""
 import contextlib
 import io
 import json
@@ -205,6 +205,103 @@ class TestPipelineEvidenceBlocks(unittest.TestCase):
         draft = json.loads((self.output / "drafts" / f"{DATE}.json").read_text())
         self.assertEqual(draft["activity"]["calendar"][0]["title"], "Invalid bounds")
         self.assertEqual(draft["ai_validation"]["status"], "error")
+
+    def test_all_day_only_pipeline_saves_context_and_zero_work_time(self):
+        context = {"title": "Deadline", "start": DATE, "end": "2026-10-07", "all_day": True}
+        self.assertEqual(self.pipeline([context]), 0)
+        self.assertEqual(self.rows(), [])
+        self.assertEqual(json.loads(self.ai.read_text()), [])
+        path = self.output / f"{DATE}.calendar-context.json"
+        self.assertEqual(json.loads(path.read_text())["calendar_context"], [context])
+        manifest = json.loads((self.output / f"{DATE}.collection.json").read_text())
+        self.assertEqual(manifest["calendar_context_count"], 1)
+        self.assertEqual(manifest["calendar_context_file"], path.name)
+        text = (self.output / f"{DATE}.md").read_text()
+        self.assertIn("0 mins", text)
+        self.assertIn("Deadline", text)
+        self.assertIn("not counted as work time", text)
+
+    def test_all_day_context_does_not_prevent_git_work_proposal(self):
+        context = {"title": "Holiday", "start": DATE, "end": "2026-10-07", "all_day": True}
+        self.assertEqual(self.pipeline([context], [commit()]), 0)
+        self.assertEqual(len(self.rows()), 1)
+        self.assertEqual(self.rows()[0]["time_basis"], "estimated")
+        self.assertEqual(self.rows()[0]["sources"]["calendar"], [])
+        self.assertEqual(len(self.rows()[0]["sources"]["commits"]), 1)
+        self.assertNotIn("Holiday", self.ai.read_text())
+
+    def test_cross_midnight_pipeline_saves_24_hour_end_with_original_evidence(self):
+        calendar = {"title": "Late support", "start": DATE+"T22:00:00+07:00", "end": "2026-10-07T02:00:00+07:00"}
+        self.assertEqual(self.pipeline([calendar], [commit("23:15")]), 0)
+        rows = self.rows()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual((rows[0]["entry"]["start"], rows[0]["entry"]["end"], rows[0]["entry"]["duration_minutes"]),
+                         ("22:00", "24:00", 120))
+        self.assertEqual(rows[0]["sources"]["calendar_events"], [calendar])
+        self.assertEqual(json.loads(self.ai.read_text())[0]["block"]["end"], "24:00")
+
+    def test_previous_night_pipeline_saves_only_target_day_portion(self):
+        calendar = {"title": "Night support", "start": "2026-10-05T22:00:00+07:00", "end": DATE+"T02:00:00+07:00"}
+        self.assertEqual(self.pipeline([calendar]), 0)
+        self.assertEqual((self.rows()[0]["entry"]["start"], self.rows()[0]["entry"]["end"],
+                          self.rows()[0]["entry"]["duration_minutes"]), ("00:00", "02:00", 120))
+
+    def test_context_snapshot_rerun_is_stable_and_deleted_context_disappears(self):
+        context = {"title": "Deadline", "start": DATE, "end": "2026-10-07", "all_day": True}
+        self.assertEqual(self.pipeline([context]), 0)
+        before = self.snapshot()
+        context_path = self.output / f"{DATE}.calendar-context.json"
+        before[context_path] = context_path.read_bytes()
+        self.assertEqual(self.pipeline([context]), 0)
+        for path, content in before.items():
+            self.assertEqual(path.read_bytes(), content)
+        self.assertEqual(self.pipeline([]), 0)
+        self.assertEqual(json.loads(context_path.read_text())["calendar_context"], [])
+        self.assertNotIn("Deadline", (self.output / f"{DATE}.md").read_text())
+
+    def test_calendar_failure_preserves_context_sidecar_and_every_final_file(self):
+        context = {"title": "Deadline", "start": DATE, "end": "2026-10-07", "all_day": True}
+        self.assertEqual(self.pipeline([context]), 0)
+        before = self.snapshot()
+        path = self.output / f"{DATE}.calendar-context.json"
+        before[path] = path.read_bytes()
+        self.assertEqual(self.pipeline([], calendar_status="error"), 2)
+        for path, content in before.items():
+            self.assertEqual(path.read_bytes(), content)
+
+    def test_context_demo_stays_separate_from_live_context(self):
+        context = {"title": "Live context", "start": DATE, "end": "2026-10-07", "all_day": True}
+        self.assertEqual(self.pipeline([context]), 0)
+        before = self.snapshot()
+        path = self.output / f"{DATE}.calendar-context.json"
+        before[path] = path.read_bytes()
+        self.assertEqual(self.pipeline([{**context, "title": "Demo context"}], demo=True), 0)
+        for path, content in before.items():
+            self.assertEqual(path.read_bytes(), content)
+        demo = json.loads((self.output / "demo" / f"{DATE}.calendar-context.json").read_text())
+        self.assertEqual(demo["collection_status"], "demo")
+        self.assertEqual(demo["calendar_context"][0]["title"], "Demo context")
+
+    def test_corrupt_context_blocks_pipeline_without_overwriting_any_final_file(self):
+        context = {"title": "Deadline", "start": DATE, "end": "2026-10-07", "all_day": True}
+        self.assertEqual(self.pipeline([context]), 0)
+        path = self.output / f"{DATE}.calendar-context.json"
+        path.write_text("{invalid")
+        before = self.snapshot()
+        before[path] = path.read_bytes()
+        self.assertEqual(self.pipeline([]), 2)
+        for path, content in before.items():
+            self.assertEqual(path.read_bytes(), content)
+
+    def test_wrong_day_context_blocks_pipeline_and_keeps_current_context(self):
+        context = {"title": "Deadline", "start": DATE, "end": "2026-10-07", "all_day": True}
+        self.assertEqual(self.pipeline([context]), 0)
+        before = self.snapshot()
+        path = self.output / f"{DATE}.calendar-context.json"
+        before[path] = path.read_bytes()
+        self.assertEqual(self.pipeline([{**context, "start": "2026-10-07", "end": "2026-10-08"}]), 2)
+        for path, content in before.items():
+            self.assertEqual(path.read_bytes(), content)
 
 
 if __name__ == "__main__":
