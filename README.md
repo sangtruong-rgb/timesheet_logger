@@ -67,6 +67,9 @@ python3 scripts/run_pipeline.py
 # Log for a specific date
 python3 scripts/run_pipeline.py --date 2026-10-06
 
+# Query specific local repositories or remote GitHub repositories
+python3 scripts/run_pipeline.py --date 2026-10-06 --repos octocat/Hello-World https://github.com/facebook/react .
+
 # Run using realistic fixtures for Calendar & PRs
 python3 scripts/run_pipeline.py \
   --date 2026-10-06 \
@@ -74,8 +77,16 @@ python3 scripts/run_pipeline.py \
   --prs-fixture data/fixtures/sample_prs.json
 ```
 
+#### Remote GitHub Repositories
+The Git collector (`scripts/get_git_activity.py`) supports uncloned remote GitHub repositories in addition to local directories:
+- **Bare slug**: `--repos owner/repo`
+- **HTTPS URL**: `--repos https://github.com/owner/repo` (or `.git` / subpath variants)
+- **SSH URL**: `--repos git@github.com:owner/repo.git`
+
+Remote commits for the target date are fetched via `gh api` (if authenticated) or HTTPS GitHub REST API using `GITHUB_TOKEN` / `GH_TOKEN` environment variables, and filtered with strict local timezone boundaries.
+
 ### C. Running Unit Tests
-All deterministic logic is covered by 16 automated tests:
+All deterministic logic is covered by 22 automated tests:
 ```bash
 python3 -m unittest discover tests
 ```

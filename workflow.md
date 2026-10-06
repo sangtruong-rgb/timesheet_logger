@@ -16,7 +16,7 @@ This document defines the complete daily execution sequence for the **Personal P
 | Step # | Classification | Step Name | Description | Reason for Classification |
 | :---: | :---: | :--- | :--- | :--- |
 | **1** | `[Script]` | **Resolve Date & Timezone** | Parse `--date YYYY-MM-DD` or detect local date & timezone offset (e.g. `+07:00`). | Deterministic calendar math. |
-| **2** | `[Script]` | **Collect Git Commits** | Query `git log --all --date=iso-strict`, filter by author and local target date, extract hashes and commit messages. | Deterministic log filtering and CLI execution. |
+| **2** | `[Script]` | **Collect Git Commits** | Query local repos via `git log --all --date=iso-strict` or remote GitHub repos (`owner/repo`, HTTPS/SSH URLs) via GitHub REST API (`gh api` or direct HTTPS). Filter by author and local target date, extracting hashes and commit messages. | Deterministic log filtering, URL slug parsing, and API query execution. |
 | **3** | `[Script]` | **Collect PR Activity** | Query GitHub (`gh` / API) or GitLab (`glab` / API) for PRs opened, reviewed, or merged today. | Deterministic API query and status extraction. |
 | **4** | `[Script]` | **Collect Calendar Events** | Retrieve Google Calendar events or parse exported `.ics` / local fixture for the day. | Deterministic calendar API/file parsing. |
 | **5** | `[Script]` | **Normalize & Deduplicate** | Strip all extraneous API metadata. Deduplicate PRs by ID, merge status conflicts, and eliminate duplicated commits. | Deterministic set/dict operations. |
