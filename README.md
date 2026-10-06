@@ -161,6 +161,34 @@ Do not pass a partial entry batch as a full-day snapshot. Source failures must r
 INCOMPLETE drafts and never reach daily reconciliation. This storage fix does not repair
 overlapping generated events or estimated work-duration rules; those have separate audit items.
 
+### Matching AI summaries to blocks
+
+AI input carries `block_id`, for example `2026-10-06_09:30_12:00`. Return that exact
+ID with the summary, independently of output order:
+
+```json
+[
+  {"block_id": "2026-10-06_09:30_12:00", "description": "Improve payment validation."}
+]
+```
+
+Partial output is allowed: blocks without AI summaries use their own deterministic
+fallback, never another block's summary. Entry audit JSON retains `block_id` and
+`summary_source: ai|fallback`, plus all original commit/PR/calendar evidence. The
+input still omits commit hashes and raw author/API metadata.
+
+Legacy `{date, block: {start, end}, description}` summaries must exactly match a
+current candidate. Date-less legacy intervals are accepted only within one target
+day with unique intervals. Position-only output, wrong/stale IDs, duplicate IDs,
+contradictory metadata, and malformed or missing explicitly requested AI files
+return exit 2 before final writes; the pipeline saves evidence and current AI input
+in a review draft while preserving previous final/manifest/export/token files.
+
+This validates block identity, not whether an AI sentence is factually correct or
+whether the underlying sources changed since an earlier payload. A frozen snapshot
+between preparation and final assembly remains F28. The CLI reads supplied AI JSON;
+it does not invoke an external model itself.
+
 #### Remote GitHub Repositories
 The Git collector (`scripts/get_git_activity.py`) supports uncloned remote GitHub repositories in addition to local directories:
 - **Bare slug**: `--repos owner/repo`

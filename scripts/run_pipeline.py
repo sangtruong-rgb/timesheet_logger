@@ -47,21 +47,28 @@ def run_source_collector(command, source, mode):
         return collection_result(source, mode, "error", reason="Collector returned an invalid result")
 
 
-def save_activity_draft(date_str, normalized, collection, output_dir, storage_reason=None, proposed_entries=None):
-    """An incomplete run records evidence, never replaces a final timesheet."""
+def save_activity_draft(date_str, normalized, collection, output_dir, storage_reason=None, proposed_entries=None,
+                        ai_reason=None, ai_payload=None):
+    """A blocked run records evidence, never replaces a final timesheet."""
     draft_dir = Path(output_dir) / "drafts"
     draft_dir.mkdir(parents=True, exist_ok=True)
     payload = {"date": date_str, "collection": collection, "activity": normalized}
     if storage_reason:
         payload["reconciliation"] = {"status": "blocked", "reason": storage_reason}
         payload["proposed_entries"] = proposed_entries
+    if ai_reason:
+        payload["ai_validation"] = {"status": "error", "reason": ai_reason}
+        payload["ai_input"] = ai_payload
     json_path = draft_dir / f"{date_str}.json"
     json_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     banner = ("> REVIEW REQUIRED: daily reconciliation was blocked. Final files were preserved."
-              if storage_reason else "> INCOMPLETE: a source is unavailable or failed. This is not a completed timesheet.")
+              if storage_reason else "> REVIEW REQUIRED: AI/block identity validation failed. Final files were preserved."
+              if ai_reason else "> INCOMPLETE: a source is unavailable or failed. This is not a completed timesheet.")
     lines = [f"# Activity draft — {date_str}", "", banner, ""]
     if storage_reason:
         lines.extend([storage_reason, ""])
+    if ai_reason:
+        lines.extend([ai_reason, ""])
     for name, source in collection["sources"].items():
         lines.append(f"- {name}: {source['status']} ({source['mode']}, {source['count']} items)")
     lines.extend(["", "## Collected evidence", "", "```json",
@@ -149,16 +156,21 @@ def run():
 
     # Step 6: Prepare minimal AI input
     from prepare_ai_input import prepare_all_blocks
-    ai_payload = prepare_all_blocks(blocks)
-
-    ai_payload_json = json.dumps(ai_payload, indent=2)
+    from block_identity import BlockIdentityError
     # Step 7: Build entries
-    from build_timesheet import build_entries
-    ai_judgments = None
-    if args.ai_output and Path(args.ai_output).exists():
-        ai_judgments = json.loads(Path(args.ai_output).read_text(encoding="utf-8"))
-
-    entries = build_entries(blocks, ai_judgments)
+    from build_timesheet import build_entries, load_ai_judgments
+    ai_payload = None
+    try:
+        ai_payload = prepare_all_blocks(blocks)
+        entries = build_entries(blocks, load_ai_judgments(args.ai_output))
+    except BlockIdentityError as exc:
+        draft = save_activity_draft(date_str, normalized, collection, output_dir,
+                                    ai_reason=str(exc), ai_payload=ai_payload)
+        print(f"\n AI VALIDATION BLOCKED: {exc}", file=sys.stderr)
+        print(f" Activity/AI-input draft: {draft}")
+        print(" Final timesheets, collection manifest, AI input, and token records were not written.")
+        return 2
+    ai_payload_json = json.dumps(ai_payload, indent=2)
     for entry in entries:
         entry["collection"] = collection
 
