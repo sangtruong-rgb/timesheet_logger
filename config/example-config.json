@@ -1,0 +1,37 @@
+{
+  "author": {
+    "name": "Sang Truong",
+    "email": "sang.truong@local"
+  },
+  "repositories": [
+    "."
+  ],
+  "timezone": "+07:00",
+  "workday": {
+    "start": "09:00",
+    "end": "18:00",
+    "lunch_start": "12:00",
+    "lunch_end": "13:30"
+  },
+  "github": {
+    "enabled": false,
+    "token_env": "GITHUB_TOKEN",
+    "repositories": []
+  },
+  "gitlab": {
+    "enabled": false,
+    "token_env": "GITLAB_TOKEN",
+    "projects": []
+  },
+  "calendar": {
+    "provider": "fixture",
+    "google_token_path": "token.json",
+    "google_credentials_path": "credentials.json",
+    "ical_path": null,
+    "fixture_path": "data/fixtures/sample_calendar.json"
+  },
+  "token_tracking": {
+    "claude_dir": "~/.claude",
+    "csv_path": "data/token-usage.csv"
+  }
+}

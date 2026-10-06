@@ -1,0 +1,2 @@
+date,session_id,input_tokens,output_tokens,cache_tokens,total_tokens,notes
+2026-10-06,session-demo-20261006,280,85,40,405,Direct run recording
