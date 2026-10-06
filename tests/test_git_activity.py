@@ -11,7 +11,7 @@ from pathlib import Path
 # Add scripts directory to path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
-from get_git_activity import parse_iso_datetime
+from get_git_activity import parse_iso_datetime, filter_commits
 from normalize_activity import clean_commits
 
 
@@ -64,6 +64,24 @@ class TestGitActivity(unittest.TestCase):
         # Verify deterministic sorting by timestamp ascending
         self.assertEqual(cleaned[0]["hash"], "commit0")
         self.assertEqual(cleaned[1]["hash"], "commit1")
+
+    def test_filter_commits_by_author_and_date(self):
+        target = datetime.date(2026, 10, 6)
+        commits = [
+            # Wrong author, right date
+            {"hash": "c1", "timestamp": "2026-10-06T10:00:00+07:00", "author": "Alice", "email": "alice@corp.com", "message": "msg1"},
+            # Right author, wrong date (yesterday)
+            {"hash": "c2", "timestamp": "2026-10-05T18:00:00+07:00", "author": "Sang", "email": "sang@corp.com", "message": "msg2"},
+            # Right author, right date
+            {"hash": "c3", "timestamp": "2026-10-06T09:15:00+07:00", "author": "Sang", "email": "sang@corp.com", "message": "msg3"},
+            # Right author, right date, later
+            {"hash": "c4", "timestamp": "2026-10-06T15:30:00+07:00", "author": "Sang Truong", "email": "sang@corp.com", "message": "msg4"}
+        ]
+
+        filtered = filter_commits(commits, target, author="Sang", tz=self.tz)
+        self.assertEqual(len(filtered), 2)
+        self.assertEqual(filtered[0]["hash"], "c3")
+        self.assertEqual(filtered[1]["hash"], "c4")
 
 
 if __name__ == "__main__":

@@ -61,6 +61,33 @@ def parse_iso_datetime(date_str: str) -> Optional[datetime.datetime]:
         return None
 
 
+def filter_commits(
+    commits: List[Dict[str, Any]],
+    target_date: datetime.date,
+    author: Optional[str] = None,
+    tz: Optional[datetime.timezone] = None
+) -> List[Dict[str, Any]]:
+    """Filter commits by author and target date in the specified timezone."""
+    if tz is None:
+        tz = get_local_timezone()
+    filtered = []
+    for c in commits:
+        if author:
+            af_lower = author.lower()
+            name = c.get("author", "").lower()
+            email = c.get("email", "").lower()
+            if af_lower not in name and af_lower not in email:
+                continue
+        dt = parse_iso_datetime(c.get("timestamp", ""))
+        if not dt:
+            continue
+        if dt.astimezone(tz).date() != target_date:
+            continue
+        filtered.append(c)
+    filtered.sort(key=lambda x: x["timestamp"])
+    return filtered
+
+
 def get_commits_for_repo(
     repo_path: str,
     target_date: datetime.date,
