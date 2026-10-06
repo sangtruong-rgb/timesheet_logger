@@ -1,0 +1,110 @@
+[
+  {
+    "entry": {
+      "date": "2026-10-06",
+      "start": "09:00",
+      "end": "09:30",
+      "duration_minutes": 30,
+      "description": "Payment workflow improvements covering initial project bootstrap and payment status fixes. PRs: None"
+    },
+    "sources": {
+      "calendar": [
+        "Daily stand-up"
+      ],
+      "commits": [],
+      "pull_requests": []
+    }
+  },
+  {
+    "entry": {
+      "date": "2026-10-06",
+      "start": "09:30",
+      "end": "12:00",
+      "duration_minutes": 150,
+      "description": "Payment workflow improvements covering initial project bootstrap and payment status fixes. PRs: #101"
+    },
+    "sources": {
+      "calendar": [
+        "Focus block"
+      ],
+      "commits": [
+        {
+          "repository": "timesheet logger",
+          "hash": "00bb08976652fe385b8b17c6284a10396c3f30e8",
+          "short_hash": "00bb089",
+          "timestamp": "2026-10-06T12:45:25+07:00",
+          "author": "Sang Truong",
+          "message": "chore: initial commit with assignment master prompt",
+          "branch": "feat/personal-timesheet-skill"
+        }
+      ],
+      "pull_requests": [
+        {
+          "id": 101,
+          "repository": "billing-service",
+          "title": "Payment fixes",
+          "status": "merged",
+          "url": "https://github.com/example/billing-service/pull/101",
+          "timestamp": "2026-10-06T11:55:00+07:00"
+        }
+      ]
+    }
+  },
+  {
+    "entry": {
+      "date": "2026-10-06",
+      "start": "13:30",
+      "end": "14:30",
+      "duration_minutes": 60,
+      "description": "Product meeting addressing project scope and alignment. PRs: None"
+    },
+    "sources": {
+      "calendar": [
+        "Product meeting"
+      ],
+      "commits": [],
+      "pull_requests": []
+    }
+  },
+  {
+    "entry": {
+      "date": "2026-10-06",
+      "start": "14:30",
+      "end": "17:00",
+      "duration_minutes": 150,
+      "description": "Analytics dashboard enhancements and data display bugfixes. PRs: #104"
+    },
+    "sources": {
+      "calendar": [
+        "Focus block"
+      ],
+      "commits": [],
+      "pull_requests": [
+        {
+          "id": 104,
+          "repository": "analytics-dashboard",
+          "title": "Dashboard fixes",
+          "status": "opened",
+          "url": "https://github.com/example/analytics-dashboard/pull/104",
+          "timestamp": "2026-10-06T16:30:00+07:00"
+        }
+      ]
+    }
+  },
+  {
+    "entry": {
+      "date": "2026-10-06",
+      "start": "17:00",
+      "end": "17:30",
+      "duration_minutes": 30,
+      "description": "Development. PRs: None"
+    },
+    "sources": {
+      "calendar": [
+        "Development"
+      ],
+      "commits": [],
+      "pull_requests": []
+    }
+  }
+]
