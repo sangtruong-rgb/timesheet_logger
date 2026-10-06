@@ -121,7 +121,7 @@ class TestTimesheet(unittest.TestCase):
                     "sources": {"calendar": ["Daily stand-up"]}
                 }
             ]
-            res = save_timesheet(entries, output_dir=tmpdir)
+            res = save_timesheet(entries, output_dir=tmpdir, target_date="2026-10-06", collection_status="complete")
             json_file = Path(tmpdir) / "2026-10-06.json"
             md_file = Path(tmpdir) / "2026-10-06.md"
 

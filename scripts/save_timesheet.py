@@ -6,10 +6,9 @@ Generates both:
 1. Machine-readable audit store: data/timesheets/YYYY-MM-DD.json (with source evidence)
 2. Human-readable document:      data/timesheets/YYYY-MM-DD.md
 
-Ensures idempotency:
-- Uses stable key (date + start + end).
-- Running multiple times updates existing entries or skips unchanged entries.
-- Never blindly duplicates timesheet rows.
+Reconciles one complete daily snapshot, including a successfully empty day.
+Replaces obsolete generated rows, preserves explicitly marked manual rows and
+exact-interval overrides, and refuses ambiguous legacy stores or conflicts.
 """
 
 import argparse
@@ -18,6 +17,10 @@ import json
 import sys
 from pathlib import Path
 from typing import List, Dict, Any, Tuple
+
+
+class TimesheetReconciliationError(ValueError):
+    """The daily store needs review before its generated rows can be replaced."""
 
 
 def get_entry_key(entry_item: Dict[str, Any]) -> str:
@@ -30,7 +33,7 @@ def upsert_entries(
     new_items: List[Dict[str, Any]]
 ) -> Tuple[List[Dict[str, Any]], int, int]:
     """
-    Idempotently merge new_items into existing_items.
+    Legacy partial-merge utility; not used to persist daily snapshots.
     Returns (merged_items, inserted_count, updated_count).
     """
     merged_map: Dict[str, Dict[str, Any]] = {}
@@ -58,7 +61,7 @@ def upsert_entries(
     return sorted_items, inserted, updated
 
 
-def render_markdown(date_str: str, items: List[Dict[str, Any]]) -> str:
+def render_markdown(date_str: str, items: List[Dict[str, Any]], collection_status=None) -> str:
     lines = [
         f"# Timesheet — {date_str}",
         "",
@@ -68,7 +71,7 @@ def render_markdown(date_str: str, items: List[Dict[str, Any]]) -> str:
         "| :--- | :---: | :--- | :--- |"
     ]
 
-    if any(item.get("collection", {}).get("status") == "demo" for item in items):
+    if collection_status == "demo" or any(item.get("collection", {}).get("status") == "demo" for item in items):
         lines[4:4] = ["> DEMO: contains explicitly selected fixture data; not a live work record.", ""]
 
     total_minutes = 0
@@ -105,58 +108,147 @@ def render_markdown(date_str: str, items: List[Dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def save_timesheet(
-    entries: List[Dict[str, Any]],
-    output_dir: str = "data/timesheets"
-) -> Dict[str, Any]:
-    if not entries:
-        return {"status": "empty", "inserted": 0, "updated": 0, "total": 0}
+def entry_interval(item, target_date):
+    """Validate enough daily-row structure to reconcile manual conflicts safely."""
+    if not isinstance(item, dict) or not isinstance(item.get("entry"), dict):
+        raise TimesheetReconciliationError("Timesheet rows must contain an entry object")
+    entry = item["entry"]
+    if entry.get("date") != target_date:
+        raise TimesheetReconciliationError("Every row must belong to the explicit target date")
 
-    # Group incoming entries by date
-    by_date: Dict[str, List[Dict[str, Any]]] = {}
-    for it in entries:
-        d = it.get("entry", {}).get("date") or datetime.date.today().isoformat()
-        by_date.setdefault(d, []).append(it)
+    def minutes(value, allow_midnight_end=False):
+        if value == "24:00" and allow_midnight_end:
+            return 1440
+        if not isinstance(value, str) or len(value) != 5:
+            raise ValueError("Expected HH:MM")
+        parsed = datetime.datetime.strptime(value, "%H:%M")
+        if parsed.strftime("%H:%M") != value:
+            raise ValueError("Expected HH:MM")
+        return parsed.hour * 60 + parsed.minute
 
+    try:
+        start = minutes(entry.get("start"))
+        end = minutes(entry.get("end"), True)
+    except (TypeError, ValueError) as exc:
+        raise TimesheetReconciliationError("Timesheet intervals require valid HH:MM times") from exc
+    if end <= start:
+        raise TimesheetReconciliationError("Timesheet intervals must end after their start; review cross-day/all-day rows")
+    duration = entry.get("duration_minutes")
+    if (not isinstance(duration, int) or isinstance(duration, bool) or duration < 0
+            or not isinstance(entry.get("description"), str)
+            or not isinstance(item.get("sources", {}), dict)):
+        raise TimesheetReconciliationError("Invalid duration, description, or sources in timesheet row")
+    return start, end
+
+
+def reconcile_daily_entries(existing, incoming, target_date, collection_status):
+    """Replace the generated set, not just matching keys; never infer legacy ownership."""
+    if collection_status not in ("complete", "demo"):
+        raise TimesheetReconciliationError("Only successful complete/demo snapshots may replace daily rows")
+    if not isinstance(existing, list) or not isinstance(incoming, list):
+        raise TimesheetReconciliationError("Timesheet stores and incoming snapshots must be JSON arrays")
+    old_generated, protected, candidates = {}, [], {}
+    known_keys = set()
+    for item in existing:
+        entry_interval(item, target_date)
+        key = get_entry_key(item)
+        if key in known_keys:
+            raise TimesheetReconciliationError("Existing store has duplicate intervals; review before reconciliation")
+        known_keys.add(key)
+        provenance = item.get("provenance")
+        if not isinstance(provenance, dict):
+            raise TimesheetReconciliationError(
+                "Legacy rows lack provenance: back up and classify them as generated, manual, or override before rerunning")
+        kind = provenance.get("kind")
+        if kind == "generated" and provenance.get("generator") == "timesheet_logger":
+            old_generated[key] = item
+        elif kind in ("manual", "override"):
+            protected.append(item)
+        else:
+            raise TimesheetReconciliationError("Unknown row provenance; review before reconciliation")
+
+    for item in incoming:
+        entry_interval(item, target_date)
+        metadata = item.get("collection", {})
+        if not isinstance(metadata, dict) or metadata.get("status", collection_status) != collection_status:
+            raise TimesheetReconciliationError("Incoming row collection status does not match the successful snapshot")
+        provenance = item.get("provenance")
+        if provenance is not None and provenance != {"kind": "generated", "generator": "timesheet_logger"}:
+            raise TimesheetReconciliationError("Incoming snapshots may only contain pipeline-generated rows")
+        key = get_entry_key(item)
+        if key in candidates:
+            raise TimesheetReconciliationError("Incoming snapshot has duplicate intervals")
+        candidates[key] = {**item, "provenance": {"kind": "generated", "generator": "timesheet_logger"}}
+
+    overridden = 0
+    for item in protected:
+        key = get_entry_key(item)
+        if item["provenance"]["kind"] == "override" and key in candidates:
+            del candidates[key]
+            overridden += 1
+    for item in protected:
+        start, end = entry_interval(item, target_date)
+        for candidate in candidates.values():
+            new_start, new_end = entry_interval(candidate, target_date)
+            if start < new_end and new_start < end:
+                raise TimesheetReconciliationError(
+                    f"Manual/override interval {item['entry']['start']}–{item['entry']['end']} overlaps regenerated rows; review required")
+    for index, item in enumerate(protected):
+        start, end = entry_interval(item, target_date)
+        for other in protected[index + 1:]:
+            other_start, other_end = entry_interval(other, target_date)
+            if start < other_end and other_start < end:
+                raise TimesheetReconciliationError("Protected manual/override rows overlap; review required")
+
+    merged = sorted([*protected, *candidates.values()], key=lambda item: (item["entry"]["start"], item["entry"]["end"]))
+    counts = {
+        "inserted": sum(key not in old_generated for key in candidates),
+        "updated": sum(key in old_generated and item != old_generated[key] for key, item in candidates.items()),
+        "removed": sum(key not in candidates for key in old_generated),
+        "preserved_manual": len(protected),
+        "overridden": overridden,
+        "total_entries": len(merged),
+    }
+    return merged, counts
+
+
+def save_timesheet(entries, output_dir="data/timesheets", *, target_date, collection_status):
+    """Persist exactly one successful daily snapshot; [] explicitly clears generated rows."""
+    try:
+        if datetime.date.fromisoformat(target_date).isoformat() != target_date:
+            raise ValueError("Noncanonical date")
+    except (TypeError, ValueError) as exc:
+        raise TimesheetReconciliationError("An explicit YYYY-MM-DD target date is required") from exc
     dir_path = Path(output_dir)
+    json_file = dir_path / f"{target_date}.json"
+    md_file = dir_path / f"{target_date}.md"
+    if md_file.exists() and not json_file.exists():
+        raise TimesheetReconciliationError("Markdown exists without its audit JSON; review before replacing it")
+    existing = []
+    if json_file.exists():
+        try:
+            existing = json.loads(json_file.read_text(encoding="utf-8"))
+        except (ValueError, OSError) as exc:
+            raise TimesheetReconciliationError("Cannot read existing daily JSON; original files were preserved") from exc
+    merged, counts = reconcile_daily_entries(existing, entries, target_date, collection_status)
+    # Validate/render before any final output mutation. Exact reruns keep bytes unchanged.
+    json_content = json.dumps(merged, indent=2)
+    md_content = render_markdown(target_date, merged, collection_status)
     dir_path.mkdir(parents=True, exist_ok=True)
-
-    summary = {"dates": {}}
-    for d, date_entries in by_date.items():
-        json_file = dir_path / f"{d}.json"
-        md_file = dir_path / f"{d}.md"
-
-        existing_entries = []
-        if json_file.exists():
-            try:
-                existing_entries = json.loads(json_file.read_text(encoding="utf-8"))
-            except Exception:
-                existing_entries = []
-
-        merged, ins, upd = upsert_entries(existing_entries, date_entries)
-
-        # Write JSON
-        json_file.write_text(json.dumps(merged, indent=2), encoding="utf-8")
-
-        # Write Markdown
-        md_content = render_markdown(d, merged)
+    if merged != existing or not json_file.exists():
+        json_file.write_text(json_content, encoding="utf-8")
+    if merged != existing or not md_file.exists():
         md_file.write_text(md_content, encoding="utf-8")
-
-        summary["dates"][d] = {
-            "inserted": ins,
-            "updated": upd,
-            "total_entries": len(merged),
-            "json_path": str(json_file),
-            "md_path": str(md_file)
-        }
-
-    return summary
+    return {"dates": {target_date: {**counts, "json_path": str(json_file), "md_path": str(md_file)}}}
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Save timesheet entries idempotently.")
+    parser = argparse.ArgumentParser(description="Reconcile one complete daily timesheet snapshot.")
     parser.add_argument("--entries-file", "-i", type=str, required=True, help="Path to entries JSON file")
     parser.add_argument("--output-dir", "-d", type=str, default="data/timesheets", help="Directory for timesheet stores")
+    parser.add_argument("--date", required=True, help="Target date YYYY-MM-DD, required even for an empty snapshot")
+    parser.add_argument("--collection-status", required=True, choices=("complete", "demo"),
+                        help="Assert successful full-day collection; demo output is isolated under demo/")
 
     args = parser.parse_args()
 
@@ -165,10 +257,16 @@ def main():
         print(f"Error: {args.entries_file} not found.", file=sys.stderr)
         sys.exit(1)
 
-    entries = json.loads(in_path.read_text(encoding="utf-8"))
-    res = save_timesheet(entries, args.output_dir)
+    try:
+        entries = json.loads(in_path.read_text(encoding="utf-8"))
+        output_dir = Path(args.output_dir) / "demo" if args.collection_status == "demo" else Path(args.output_dir)
+        res = save_timesheet(entries, str(output_dir), target_date=args.date, collection_status=args.collection_status)
+    except (ValueError, OSError) as exc:
+        print(f"Save blocked: {exc}", file=sys.stderr)
+        return 2
     print(json.dumps(res, indent=2))
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

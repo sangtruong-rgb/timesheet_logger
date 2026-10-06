@@ -47,15 +47,21 @@ def run_source_collector(command, source, mode):
         return collection_result(source, mode, "error", reason="Collector returned an invalid result")
 
 
-def save_activity_draft(date_str, normalized, collection, output_dir):
+def save_activity_draft(date_str, normalized, collection, output_dir, storage_reason=None, proposed_entries=None):
     """An incomplete run records evidence, never replaces a final timesheet."""
     draft_dir = Path(output_dir) / "drafts"
     draft_dir.mkdir(parents=True, exist_ok=True)
     payload = {"date": date_str, "collection": collection, "activity": normalized}
+    if storage_reason:
+        payload["reconciliation"] = {"status": "blocked", "reason": storage_reason}
+        payload["proposed_entries"] = proposed_entries
     json_path = draft_dir / f"{date_str}.json"
     json_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    lines = [f"# Activity draft — {date_str}", "",
-             "> INCOMPLETE: a source is unavailable or failed. This is not a completed timesheet.", ""]
+    banner = ("> REVIEW REQUIRED: daily reconciliation was blocked. Final files were preserved."
+              if storage_reason else "> INCOMPLETE: a source is unavailable or failed. This is not a completed timesheet.")
+    lines = [f"# Activity draft — {date_str}", "", banner, ""]
+    if storage_reason:
+        lines.extend([storage_reason, ""])
     for name, source in collection["sources"].items():
         lines.append(f"- {name}: {source['status']} ({source['mode']}, {source['count']} items)")
     lines.extend(["", "## Collected evidence", "", "```json",
@@ -146,14 +152,6 @@ def run():
     ai_payload = prepare_all_blocks(blocks)
 
     ai_payload_json = json.dumps(ai_payload, indent=2)
-    if args.export_ai_input:
-        ai_path = Path(args.export_ai_input)
-        if demo:
-            ai_path = ai_path.parent / "demo" / ai_path.name
-        ai_path.parent.mkdir(parents=True, exist_ok=True)
-        ai_path.write_text(ai_payload_json, encoding="utf-8")
-        print(f"   -> AI payload written to {ai_path}")
-
     # Step 7: Build entries
     from build_timesheet import build_entries
     ai_judgments = None
@@ -166,8 +164,23 @@ def run():
 
     # Step 8: Save idempotently
     print(">> [5/6] Saving timesheet idempotently...")
-    from save_timesheet import save_timesheet
-    save_result = save_timesheet(entries, str(output_dir))
+    from save_timesheet import save_timesheet, TimesheetReconciliationError
+    try:
+        save_result = save_timesheet(entries, str(output_dir), target_date=date_str,
+                                     collection_status=collection["status"])
+    except TimesheetReconciliationError as exc:
+        draft = save_activity_draft(date_str, normalized, collection, output_dir, str(exc), entries)
+        print(f"\n RECONCILIATION BLOCKED: {exc}", file=sys.stderr)
+        print(f" Activity/proposed-entry draft: {draft}")
+        print(" Final timesheets, collection manifest, AI input, and token records were not written.")
+        return 2
+    if args.export_ai_input:
+        ai_path = Path(args.export_ai_input)
+        if demo:
+            ai_path = ai_path.parent / "demo" / ai_path.name
+        ai_path.parent.mkdir(parents=True, exist_ok=True)
+        ai_path.write_text(ai_payload_json, encoding="utf-8")
+        print(f"   -> AI payload written to {ai_path}")
     output_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = output_dir / f"{date_str}.collection.json"
     manifest_path.write_text(json.dumps({"date": date_str, **collection}, indent=2), encoding="utf-8")
@@ -185,7 +198,8 @@ def run():
         info = save_result["dates"][date_str]
         print(f" Timesheet JSON: {info['json_path']}")
         print(f" Timesheet Markdown: {info['md_path']}")
-        print(f" Total Entries: {info['total_entries']} (Inserted: {info['inserted']}, Updated: {info['updated']})")
+        print(f" Total Entries: {info['total_entries']} (Inserted: {info['inserted']}, Updated: {info['updated']}, "
+              f"Removed: {info['removed']}, Manual preserved: {info['preserved_manual']}, Overridden: {info['overridden']})")
     return 0
 
 
