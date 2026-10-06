@@ -44,7 +44,7 @@ The full ordered sequence and deterministic breakdown are specified in:
 
 3. **Read Minimal AI Input**:
    Inspect `data/raw/ai_input_<YYYY-MM-DD>.json`.
-   Each payload carries a stable `block_id` derived from date/start/end, plus `time_basis`, compact block times, actual calendar titles, commit messages, and PR titles. No git hashes, author info, or raw metadata are present. Copy the exact `block_id` when returning a summary.
+   The input object contains `blocks`, `unassigned_activity`, and `review`. Each item in `blocks` carries a stable `block_id` derived from date/start/end, plus `time_basis`, compact block times, actual calendar titles, commit messages, and PR titles. No git hashes, author info, or raw metadata are present. Copy the exact `block_id` when returning a summary. `unassigned_activity` is a separate compact review list: do not attach it to any block, summarize it as work inside a block, or infer duration from it. If `blocks` is empty, return `[]`; report the review evidence separately.
 
 4. **Perform AI Topic Synthesis**:
    For each block that has commits or PRs:
@@ -75,4 +75,5 @@ The full ordered sequence and deterministic breakdown are specified in:
 6. **Confirm to User**:
    Display the generated timesheet summary from `data/timesheets/<YYYY-MM-DD>.md` and point to the audit JSON in `data/timesheets/<YYYY-MM-DD>.json`. Retain the scheduled/estimated labels and proposed-time notice. Scheduled Calendar time does not confirm attendance; estimated time is not measured work time.
    If overlap is marked, report that source collection can be complete while attendance needs review. The saved output is a proposal; do not present it as confirmed meeting time. Attendance selection is a separate human review, not an AI decision.
+   Unmatched commits/PR actions appear under **Unassigned activity — review required** and in `<YYYY-MM-DD>.activity-review.json`, linked from the collection manifest. They contribute no duration. Source collection can be COMPLETE while assignment review is required; report both statuses. Do not turn a day containing only unmatched activity into an assumed workday. Breaktime/OT labels remain deferred.
    All-day context is shown below the Markdown rows and stored in `data/timesheets/<YYYY-MM-DD>.calendar-context.json` when present. It is not work duration or an automatic day-off decision and is excluded from AI block summaries. Timed events crossing midnight are shown only for the requested day, using `24:00` as its midnight end; preserve original source boundaries for audit.

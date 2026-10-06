@@ -163,7 +163,8 @@ overlapping generated events or estimated work-duration rules; those have separa
 
 ### Matching AI summaries to blocks
 
-AI input carries `block_id`, for example `2026-10-06_09:30_12:00`. Return that exact
+Exported AI input is an object with `blocks`, `unassigned_activity`, and `review`.
+Each item in `blocks` carries `block_id`, for example `2026-10-06_09:30_12:00`. Return that exact
 ID with the summary, independently of output order:
 
 ```json
@@ -210,10 +211,42 @@ All development gaps before, between, and after Calendar events subtract the
 current lunch interval `12:00–13:30` before applying the 30-minute minimum and
 checking activity independently in each remaining interval. Scheduled Calendar
 events overlapping lunch are retained whole. Lunch-only commit/PR evidence is
-preserved through the existing unmatched-activity fallback, whose routing remains
-F08. Lunch times are currently hardcoded; reading configurable workday settings
-remains D02. No-Calendar fallback is unchanged, including its morning-only
-`09:00–12:30` proposal; that inconsistency remains D02.
+preserved separately for review, without attaching it to an unrelated interval.
+Lunch times are currently hardcoded; reading configurable workday settings remains
+D02. The no-Calendar morning-only `09:00–12:30` proposal remains D02; candidate
+windows are now retained only when an aware timestamp actually falls inside them.
+
+### Activity without a matching interval
+
+Commits and each PR action are assigned only by aware timestamp within `[start,end)`
+on the selected local day. Unmatched evidence is never moved into the first work
+block or an unrelated meeting. Missing/invalid timestamps, timestamps without a
+timezone, wrong-day events, and timestamps outside all blocks have explicit reasons.
+A scheduled event during lunch or outside the workday still accepts activity inside
+its own interval; this fix does not classify breaktime or OT.
+
+Unassigned events contribute no work duration. Their original normalized evidence
+is stored in `YYYY-MM-DD.activity-review.json`, and Markdown shows them separately
+under **Unassigned activity — review required**. The collection manifest links the
+file, reports its count and `review.status`. COMPLETE means successful source
+collection; it can coexist with required assignment/attendance review. A day with
+only unmatched activity saves zero timed entries plus evidence, rather than inventing
+a workday window. Supported no-Calendar proposals remain explicitly estimated.
+
+AI input includes a compact, separate `unassigned_activity` list and an instruction
+to summarize only `blocks`. Do not infer a block or work duration from unassigned
+evidence. AI output remains a JSON array of keyed summaries. Old AI exports are
+historical artifacts; regenerate the input with the current CLI before synthesis.
+
+The standalone block CLI emits `{blocks, unassigned_activity}`. Preparation and
+entry assembly accept this envelope or legacy arrays; assembly preserves review
+evidence in `{entries, unassigned_activity}` for the save CLI. The save CLI also
+accepts `--unassigned-activity-file review-array.json`: omission preserves an
+existing review sidecar; an explicit `[]` clears it. Successful pipeline reruns
+replace the complete review list, re-render review-only changes, and preserve bytes
+on exact reruns. Invalid existing/incoming review stores stop final writes; source
+failure preserves review alongside other outputs. Demo review stays under demo/.
+Multi-file transaction/concurrency work remains F29; no automatic legacy migration.
 
 ### All-day context and daily Calendar scope
 

@@ -61,7 +61,7 @@ class TestPipelineEvidenceBlocks(unittest.TestCase):
         self.assertEqual(rows[0]["entry"]["duration_minutes"], 30)
         self.assertEqual(rows[0]["entry"]["description"], "Daily stand-up. PRs: None")
         self.assertEqual(rows[0]["time_basis"], "scheduled")
-        self.assertEqual(json.loads(self.ai.read_text())[0]["time_basis"], "scheduled")
+        self.assertEqual(json.loads(self.ai.read_text())["blocks"][0]["time_basis"], "scheduled")
 
     def test_supported_gap_is_explicit_estimate_in_json_markdown_and_ai_input(self):
         self.assertEqual(self.pipeline([event(), event("13:30", "14:00", "Planning")], [commit()]), 0)
@@ -70,7 +70,7 @@ class TestPipelineEvidenceBlocks(unittest.TestCase):
         self.assertEqual(estimates[0]["sources"]["calendar"], [])
         self.assertEqual(estimates[0]["sources"]["commits"][0]["hash"], "test-commit")
         self.assertIn("(estimated)", (self.output / f"{DATE}.md").read_text())
-        self.assertEqual(sum(p["time_basis"] == "estimated" for p in json.loads(self.ai.read_text())), 1)
+        self.assertEqual(sum(p["time_basis"] == "estimated" for p in json.loads(self.ai.read_text())["blocks"]), 1)
 
     def test_rerun_without_activity_removes_previously_supported_generated_gap(self):
         events = [event(), event("13:30", "14:00", "Planning")]
@@ -114,7 +114,7 @@ class TestPipelineEvidenceBlocks(unittest.TestCase):
         self.assertEqual(sum(r["entry"]["duration_minutes"] for r in rows), 420)
         collected = [c for r in rows for c in r["sources"]["commits"]]
         self.assertEqual([{key: c[key] for key in activities[0]} for c in collected], activities)
-        self.assertEqual([r["block_id"] for r in rows], [b["block_id"] for b in json.loads(self.ai.read_text())])
+        self.assertEqual([r["block_id"] for r in rows], [b["block_id"] for b in json.loads(self.ai.read_text())["blocks"]])
         self.assertIn("**Total Proposed Time:** 420 mins", (self.output / f"{DATE}.md").read_text())
 
     def test_existing_generated_cross_lunch_row_is_replaced_by_two_segments(self):
@@ -153,7 +153,7 @@ class TestPipelineEvidenceBlocks(unittest.TestCase):
         self.assertEqual(rows[1]["review"]["attendance"], "unconfirmed")
         self.assertEqual(rows[1]["sources"]["calendar_events"], events)
         self.assertEqual(len(rows[1]["sources"]["commits"]), 1)
-        self.assertTrue(json.loads(self.ai.read_text())[1]["calendar_overlap"])
+        self.assertTrue(json.loads(self.ai.read_text())["blocks"][1]["calendar_overlap"])
         self.assertIn("**Total Proposed Time:** 90 mins", (self.output / f"{DATE}.md").read_text())
         self.assertIn("REVIEW REQUIRED", self.stdout.getvalue())
         manifest = json.loads((self.output / f"{DATE}.collection.json").read_text())
@@ -210,7 +210,7 @@ class TestPipelineEvidenceBlocks(unittest.TestCase):
         context = {"title": "Deadline", "start": DATE, "end": "2026-10-07", "all_day": True}
         self.assertEqual(self.pipeline([context]), 0)
         self.assertEqual(self.rows(), [])
-        self.assertEqual(json.loads(self.ai.read_text()), [])
+        self.assertEqual(json.loads(self.ai.read_text())["blocks"], [])
         path = self.output / f"{DATE}.calendar-context.json"
         self.assertEqual(json.loads(path.read_text())["calendar_context"], [context])
         manifest = json.loads((self.output / f"{DATE}.collection.json").read_text())
@@ -238,7 +238,7 @@ class TestPipelineEvidenceBlocks(unittest.TestCase):
         self.assertEqual((rows[0]["entry"]["start"], rows[0]["entry"]["end"], rows[0]["entry"]["duration_minutes"]),
                          ("22:00", "24:00", 120))
         self.assertEqual(rows[0]["sources"]["calendar_events"], [calendar])
-        self.assertEqual(json.loads(self.ai.read_text())[0]["block"]["end"], "24:00")
+        self.assertEqual(json.loads(self.ai.read_text())["blocks"][0]["block"]["end"], "24:00")
 
     def test_previous_night_pipeline_saves_only_target_day_portion(self):
         calendar = {"title": "Night support", "start": "2026-10-05T22:00:00+07:00", "end": DATE+"T02:00:00+07:00"}

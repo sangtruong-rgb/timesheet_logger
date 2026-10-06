@@ -77,7 +77,7 @@ class TestPipelineReconciliation(unittest.TestCase):
         self.assertEqual(self.pipeline(), 0)
         self.assertEqual(json.loads(self.json.read_text()), [])
         self.assertEqual(json.loads(self.manifest.read_text())["status"], "complete")
-        self.assertEqual(json.loads(self.ai.read_text()), [])
+        self.assertEqual(json.loads(self.ai.read_text())["blocks"], [])
 
     def test_source_failure_does_not_clear_previously_generated_rows(self):
         self.assertEqual(self.pipeline([self.block("09:00", "12:00", 180)]), 0)

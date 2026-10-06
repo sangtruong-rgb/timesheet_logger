@@ -56,25 +56,31 @@ class TestCalendarGapLunch(unittest.TestCase):
 
     def test_gap_entirely_inside_lunch_creates_no_development(self):
         calendars = [event('09:00', '12:00', 'Focus'), event('13:00', '17:30', 'Workshop')]
-        blocks = build_time_blocks(model(calendars, [commit('12:30')]))
+        unassigned = []
+        blocks = build_time_blocks(model(calendars, [commit('12:30')]), unassigned_activity=unassigned)
         self.assertEqual(estimates(blocks), [])
-        self.assertEqual(sum(len(b['commits']) for b in blocks), 1)
+        self.assertEqual(sum(len(b['commits']) for b in blocks), 0)
+        self.assertEqual(unassigned[0]['activity'], commit('12:30'))
 
     def test_lunch_boundaries_are_half_open_for_activity_support(self):
         for time, expected in [('11:59', [('09:30', '12:00', 150)]), ('12:00', []),
                                ('13:29', []), ('13:30', [('13:30', '17:30', 240)])]:
             with self.subTest(time=time):
-                blocks = build_time_blocks(model([event()], [commit(time)]))
+                unassigned = []
+                blocks = build_time_blocks(model([event()], [commit(time)]), unassigned_activity=unassigned)
                 self.assertEqual(estimates(blocks), expected)
-                self.assertEqual(sum(len(b['commits']) for b in blocks), 1)
+                self.assertEqual(sum(len(b['commits']) for b in blocks) + len(unassigned), 1)
+                self.assertEqual(len(unassigned), 0 if expected else 1)
 
     def test_minimum_duration_applies_after_lunch_subtraction(self):
         for end, expected in [('13:50', []), ('14:00', [('13:30', '14:00', 30)])]:
             with self.subTest(end=end):
+                unassigned = []
                 blocks = build_time_blocks(model([event('09:00', '11:50', 'Focus'), event(end, '17:30', 'Workshop')],
-                                                [commit('11:55'), commit('13:40', 'afternoon')]))
+                                                [commit('11:55'), commit('13:40', 'afternoon')]), unassigned_activity=unassigned)
                 self.assertEqual(estimates(blocks), expected)
-                self.assertEqual(sum(len(b['commits']) for b in blocks), 2)
+                self.assertEqual(sum(len(b['commits']) for b in blocks) + len(unassigned), 2)
+                self.assertEqual(len(unassigned), 1 if expected else 2)
 
     def test_calendar_lunch_meeting_is_retained_whole_with_faithful_title(self):
         blocks = build_time_blocks(model([event('12:00', '13:30', 'Client lunch')]))
@@ -86,9 +92,11 @@ class TestCalendarGapLunch(unittest.TestCase):
     def test_lunch_only_pr_creates_no_gap_and_evidence_is_preserved(self):
         pr = {'id': 101, 'repository': 'test/project', 'title': 'Payment', 'events': [
             {'action': 'opened', 'timestamp': f'{DATE}T12:30:00+07:00'}]}
-        blocks = build_time_blocks(model([event()], prs=[pr]))
+        unassigned = []
+        blocks = build_time_blocks(model([event()], prs=[pr]), unassigned_activity=unassigned)
         self.assertEqual(estimates(blocks), [])
-        self.assertEqual([e for b in blocks for p in b['prs'] for e in p['events']], pr['events'])
+        self.assertEqual([p for b in blocks for p in b['prs']], [])
+        self.assertEqual([e for record in unassigned for e in record['activity']['events']], pr['events'])
 
     def test_pr_actions_independently_support_both_segments(self):
         pr = {'id': 101, 'repository': 'test/project', 'title': 'Payment', 'events': [

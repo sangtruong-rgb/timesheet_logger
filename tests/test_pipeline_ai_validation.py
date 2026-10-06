@@ -61,7 +61,7 @@ class TestPipelineAIValidation(unittest.TestCase):
         draft = json.loads((self.output / "drafts" / f"{DATE}.json").read_text())
         self.assertEqual(draft["collection"]["status"], "complete")
         self.assertEqual(draft["ai_validation"]["status"], "error")
-        self.assertEqual([p["block_id"] for p in draft["ai_input"]], [MEETING_ID, WORK_ID])
+        self.assertEqual([p["block_id"] for p in draft["ai_input"]["blocks"]], [MEETING_ID, WORK_ID])
         self.assertIn("AI VALIDATION BLOCKED", self.stderr.getvalue())
         self.assertNotIn("successfully completed", self.stdout.getvalue())
 
@@ -96,7 +96,7 @@ class TestPipelineAIValidation(unittest.TestCase):
         self.assertEqual([e["summary_source"] for e in entries], ["fallback", "ai"])
         self.assertNotIn("AI payment summary", entries[0]["entry"]["description"])
         self.assertIn("AI payment summary", entries[1]["entry"]["description"])
-        self.assertEqual([p["block_id"] for p in json.loads(self.export.read_text())], [e["block_id"] for e in entries])
+        self.assertEqual([p["block_id"] for p in json.loads(self.export.read_text())["blocks"]], [e["block_id"] for e in entries])
         self.assertEqual(entries[1]["sources"]["commits"][0]["hash"], "audit-sha")
 
     def test_duplicate_candidates_block_before_any_final_write(self):

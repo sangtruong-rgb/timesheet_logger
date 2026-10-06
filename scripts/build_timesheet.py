@@ -22,6 +22,7 @@ import sys
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from block_identity import BlockIdentityError, get_block_id, index_blocks
+from activity_review import unpack_activity_snapshot
 
 
 import re
@@ -227,12 +228,13 @@ def main():
         sys.exit(1)
 
     try:
-        blocks = json.loads(b_path.read_text(encoding="utf-8"))
+        blocks, unassigned = unpack_activity_snapshot(json.loads(b_path.read_text(encoding="utf-8")), "blocks")
         entries = build_entries(blocks, load_ai_judgments(args.ai_output))
-    except (BlockIdentityError, OSError, json.JSONDecodeError) as exc:
+    except (ValueError, OSError) as exc:
         print(f"AI/block validation failed: {exc}", file=sys.stderr)
         return 2
-    out_json = json.dumps(entries, indent=2)
+    out_json = json.dumps({"entries": entries, "unassigned_activity": unassigned}
+                          if unassigned is not None else entries, indent=2)
 
     if args.output and args.output != "-":
         out_p = Path(args.output)

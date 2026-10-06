@@ -17,6 +17,7 @@ import json
 import sys
 from pathlib import Path
 from typing import List, Dict, Any, Tuple
+from activity_review import REASONS, validate_unassigned_activity, unpack_activity_snapshot
 
 
 class TimesheetReconciliationError(ValueError):
@@ -61,7 +62,8 @@ def upsert_entries(
     return sorted_items, inserted, updated
 
 
-def render_markdown(date_str: str, items: List[Dict[str, Any]], collection_status=None, calendar_context=None) -> str:
+def render_markdown(date_str: str, items: List[Dict[str, Any]], collection_status=None, calendar_context=None,
+                    unassigned_activity=None) -> str:
     lines = [
         f"# Timesheet — {date_str}",
         "",
@@ -80,6 +82,8 @@ def render_markdown(date_str: str, items: List[Dict[str, Any]], collection_statu
         lines[4:4] = ["> REVIEW REQUIRED: overlapping Calendar events need attendance confirmation. Scheduled coverage is not confirmed meeting time.", ""]
     if has_estimates:
         lines[4:4] = ["> Estimated intervals are proposals based on activity timestamps, not measured work time.", ""]
+    if unassigned_activity:
+        lines[4:4] = ["> REVIEW REQUIRED: some activity could not be assigned by timestamp. It contributes no work duration.", ""]
 
     total_minutes = 0
     scheduled_minutes = 0
@@ -122,7 +126,7 @@ def render_markdown(date_str: str, items: List[Dict[str, Any]], collection_statu
     hours = total_minutes // 60
     mins = total_minutes % 60
     lines.append("")
-    total_label = "Total Proposed Time" if has_estimates or has_overlap else "Total Tracked Time"
+    total_label = "Total Proposed Time" if has_estimates or has_overlap or unassigned_activity else "Total Tracked Time"
     lines.append(f"**{total_label}:** {total_minutes} mins ({hours}h {mins:02d}m)")
     if any(item.get("time_basis") in ("scheduled", "estimated") for item in items):
         lines.append(f"Scheduled Calendar: {scheduled_minutes} mins; estimated development: {estimated_minutes} mins; "
@@ -136,6 +140,17 @@ def render_markdown(date_str: str, items: List[Dict[str, Any]], collection_statu
         for event in calendar_context:
             title = event["title"].replace("\n", " ")
             lines.append(f"- {title} — all-day, {event['start']} to {event['end']} (end date exclusive).")
+        lines.append("")
+    if unassigned_activity:
+        lines.extend(["## Unassigned activity — review required", "",
+                      "These events are retained as evidence, outside timed entries and totals.", ""])
+        for record in unassigned_activity:
+            activity = record["activity"]
+            identity = (f"Commit {activity.get('hash', '(unknown)')}: {activity.get('message', '')}"
+                        if record["source"] == "git" else
+                        f"PR #{activity['id']} ({activity.get('repository', '')}), {activity.get('status', '')}: {activity.get('title', '')}")
+            timestamp = activity.get("timestamp") or "(missing)"
+            lines.append(f"- {identity} — {timestamp}; {REASONS[record['reason']]}.".replace("\n", " "))
         lines.append("")
     return "\n".join(lines)
 
@@ -260,7 +275,8 @@ def validate_calendar_context(context, target_date):
             raise TimesheetReconciliationError("All-day context requires valid dates overlapping the target day") from exc
 
 
-def save_timesheet(entries, output_dir="data/timesheets", *, target_date, collection_status, calendar_context=None):
+def save_timesheet(entries, output_dir="data/timesheets", *, target_date, collection_status, calendar_context=None,
+                   unassigned_activity=None):
     """Persist exactly one successful daily snapshot; [] explicitly clears generated rows."""
     try:
         if datetime.date.fromisoformat(target_date).isoformat() != target_date:
@@ -298,18 +314,44 @@ def save_timesheet(entries, output_dir="data/timesheets", *, target_date, collec
     context_record = {"date": target_date, "collection_status": collection_status, "calendar_context": context}
     write_context = bool(context) or context_file.exists()
     context_changed = write_context and context_record != old_context
+    review_file = dir_path / f"{target_date}.activity-review.json"
+    old_review = None
+    try:
+        if review_file.exists():
+            old_review = json.loads(review_file.read_text(encoding="utf-8"))
+            if (not isinstance(old_review, dict) or old_review.get("date") != target_date
+                    or old_review.get("collection_status") not in ("complete", "demo")):
+                raise ValueError("Invalid activity review store")
+            validate_unassigned_activity(old_review["unassigned_activity"])
+            expected = "required" if old_review["unassigned_activity"] else "none"
+            if old_review.get("review") != {"status": expected}:
+                raise ValueError("Invalid activity review status")
+        unassigned = unassigned_activity
+        if unassigned is None:
+            unassigned = old_review["unassigned_activity"] if old_review else []
+        validate_unassigned_activity(unassigned)
+    except (KeyError, TypeError, ValueError, OSError) as exc:
+        raise TimesheetReconciliationError("Invalid unassigned activity/review store; original files were preserved") from exc
+    review_record = {"date": target_date, "collection_status": collection_status,
+                     "review": {"status": "required" if unassigned else "none"}, "unassigned_activity": unassigned}
+    write_review = bool(unassigned) or review_file.exists()
+    review_changed = write_review and review_record != old_review
     # Validate/render before any final output mutation. Exact reruns keep bytes unchanged.
     json_content = json.dumps(merged, indent=2)
     context_content = json.dumps(context_record, indent=2)
-    md_content = render_markdown(target_date, merged, collection_status, context)
+    md_content = render_markdown(target_date, merged, collection_status, context, unassigned)
     dir_path.mkdir(parents=True, exist_ok=True)
     if merged != existing or not json_file.exists():
         json_file.write_text(json_content, encoding="utf-8")
-    if merged != existing or context_changed or not md_file.exists():
+    if merged != existing or context_changed or review_changed or not md_file.exists():
         md_file.write_text(md_content, encoding="utf-8")
     if context_changed:
         context_file.write_text(context_content, encoding="utf-8")
+    if review_changed:
+        review_file.write_text(json.dumps(review_record, indent=2), encoding="utf-8")
     return {"dates": {target_date: {**counts, "json_path": str(json_file), "md_path": str(md_file),
+                                   "unassigned_activity_count": len(unassigned),
+                                   **({"activity_review_path": str(review_file)} if write_review else {}),
                                    **({"calendar_context_path": str(context_file)} if write_context else {})}}}
 
 
@@ -319,6 +361,7 @@ def main():
     parser.add_argument("--output-dir", "-d", type=str, default="data/timesheets", help="Directory for timesheet stores")
     parser.add_argument("--date", required=True, help="Target date YYYY-MM-DD, required even for an empty snapshot")
     parser.add_argument("--calendar-context-file", help="Optional JSON array of all-day context; [] explicitly clears it")
+    parser.add_argument("--unassigned-activity-file", help="Optional JSON array of unassigned evidence; [] explicitly clears it")
     parser.add_argument("--collection-status", required=True, choices=("complete", "demo"),
                         help="Assert successful full-day collection; demo output is isolated under demo/")
 
@@ -330,12 +373,14 @@ def main():
         sys.exit(1)
 
     try:
-        entries = json.loads(in_path.read_text(encoding="utf-8"))
+        entries, unassigned = unpack_activity_snapshot(json.loads(in_path.read_text(encoding="utf-8")), "entries")
+        if args.unassigned_activity_file:
+            unassigned = json.loads(Path(args.unassigned_activity_file).read_text(encoding="utf-8"))
         context = json.loads(Path(args.calendar_context_file).read_text(encoding="utf-8")) if args.calendar_context_file else None
         output_dir = Path(args.output_dir) / "demo" if args.collection_status == "demo" else Path(args.output_dir)
         res = save_timesheet(entries, str(output_dir), target_date=args.date, collection_status=args.collection_status,
-                             calendar_context=context)
-    except (ValueError, OSError) as exc:
+                             calendar_context=context, unassigned_activity=unassigned)
+    except (KeyError, ValueError, OSError) as exc:
         print(f"Save blocked: {exc}", file=sys.stderr)
         return 2
     print(json.dumps(res, indent=2))
