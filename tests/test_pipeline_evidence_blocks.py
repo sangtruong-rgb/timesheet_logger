@@ -1,4 +1,4 @@
-"""F04 end-to-end assembly with synthetic collector responses, real block/storage code."""
+"""F04/F05 assembly with synthetic collector responses, real block/storage code."""
 import contextlib
 import io
 import json
@@ -104,6 +104,44 @@ class TestPipelineEvidenceBlocks(unittest.TestCase):
         demo = json.loads((self.output / "demo" / f"{DATE}.json").read_text())
         self.assertTrue(all(r["time_basis"] == "estimated" for r in demo))
         self.assertIn("DEMO:", (self.output / "demo" / f"{DATE}.md").read_text())
+
+    def test_final_gap_lunch_split_reaches_json_markdown_and_ai_input(self):
+        activities = [commit("10:00"), commit("15:00", "afternoon")]
+        self.assertEqual(self.pipeline([event()], activities), 0)
+        rows = self.rows()
+        self.assertEqual([(r["entry"]["start"], r["entry"]["end"]) for r in rows],
+                         [("09:00", "09:30"), ("09:30", "12:00"), ("13:30", "17:30")])
+        self.assertEqual(sum(r["entry"]["duration_minutes"] for r in rows), 420)
+        collected = [c for r in rows for c in r["sources"]["commits"]]
+        self.assertEqual([{key: c[key] for key in activities[0]} for c in collected], activities)
+        self.assertEqual([r["block_id"] for r in rows], [b["block_id"] for b in json.loads(self.ai.read_text())])
+        self.assertIn("**Total Proposed Time:** 420 mins", (self.output / f"{DATE}.md").read_text())
+
+    def test_existing_generated_cross_lunch_row_is_replaced_by_two_segments(self):
+        from save_timesheet import save_timesheet
+        old = {"entry": {"date": DATE, "start": "09:30", "end": "17:30",
+                        "duration_minutes": 480, "description": "Old estimated work. PRs: None"},
+               "time_basis": "estimated", "sources": {"calendar": [], "commits": [], "pull_requests": []}}
+        save_timesheet([old], self.output, target_date=DATE, collection_status="complete")
+        self.assertEqual(self.pipeline([event()], [commit("10:00"), commit("15:00", "afternoon")]), 0)
+        self.assertEqual(len(self.rows()), 3)
+        self.assertNotIn(("09:30", "17:30"), [(r["entry"]["start"], r["entry"]["end"]) for r in self.rows()])
+        self.assertIn("Removed: 1", self.stdout.getvalue())
+
+    def test_split_lunch_snapshot_is_idempotent(self):
+        activities = [commit("10:00"), commit("15:00", "afternoon")]
+        self.assertEqual(self.pipeline([event()], activities), 0)
+        before = self.snapshot()
+        self.assertEqual(self.pipeline([event()], activities), 0)
+        for path, content in before.items():
+            self.assertEqual(path.read_bytes(), content)
+
+    def test_calendar_failure_preserves_existing_split_lunch_snapshot(self):
+        self.assertEqual(self.pipeline([event()], [commit("10:00"), commit("15:00", "afternoon")]), 0)
+        before = self.snapshot()
+        self.assertEqual(self.pipeline([], calendar_status="error"), 2)
+        for path, content in before.items():
+            self.assertEqual(path.read_bytes(), content)
 
 
 if __name__ == "__main__":
