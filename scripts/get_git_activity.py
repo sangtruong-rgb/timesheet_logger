@@ -16,13 +16,14 @@ import datetime
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
-import urllib.error
-import urllib.request
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
+
+from activity_settings import add_settings_arguments, day_bounds, identity_match, settings_from_args
+from collection_result import SourceUnavailable, collection_result, emit_result
+from github_api import GitHubAPI, GitHubAPIError, check_gh_cli
 
 
 def get_local_timezone() -> datetime.timezone:
@@ -113,17 +114,6 @@ def parse_github_repo_slug(repo_str: str) -> Optional[Tuple[str, str]]:
     return None
 
 
-def check_gh_cli() -> bool:
-    """Check if GitHub CLI (gh) is installed and authenticated."""
-    if not shutil.which("gh"):
-        return False
-    try:
-        res = subprocess.run(["gh", "auth", "status"], capture_output=True, text=True, check=False)
-        return res.returncode == 0
-    except Exception:
-        return False
-
-
 def normalize_api_commits(
     raw_items: List[Dict[str, Any]],
     repo_name: str,
@@ -161,71 +151,25 @@ def normalize_api_commits(
             "author": author_name,
             "email": author_email,
             "message": first_line,
-            "branch": None
+            "branch": None,
+            "github_author": (item.get("author") or {}).get("login")
         })
 
     return filter_commits(normalized, target_date, author=author, tz=tz)
 
 
 def fetch_github_api_commits(
-    owner: str,
-    repo: str,
-    target_date: datetime.date,
-    author: Optional[str] = None,
-    tz: Optional[datetime.timezone] = None
-) -> List[Dict[str, Any]]:
-    """
-    Fetch commits for a remote GitHub repository using GitHub REST API.
-    Uses gh CLI if available; falls back to direct HTTPS requests with optional GITHUB_TOKEN.
-    """
-    if tz is None:
-        tz = get_local_timezone()
-
-    start_dt = datetime.datetime.combine(target_date, datetime.time.min, tzinfo=tz)
-    end_dt = datetime.datetime.combine(target_date, datetime.time.max, tzinfo=tz)
-    since_utc = start_dt.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    until_utc = end_dt.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-    raw_items: List[Dict[str, Any]] = []
-
-    # Priority 1: gh CLI if installed and authenticated
-    if check_gh_cli():
-        endpoint = f"repos/{owner}/{repo}/commits?since={since_utc}&until={until_utc}&per_page=100"
-        try:
-            res = subprocess.run(["gh", "api", endpoint], capture_output=True, text=True, check=False)
-            if res.returncode == 0:
-                parsed = json.loads(res.stdout) if res.stdout.strip() else []
-                if isinstance(parsed, list):
-                    return normalize_api_commits(parsed, repo, target_date, author=author, tz=tz)
-        except Exception as e:
-            print(f"Warning: gh api failed for {owner}/{repo}: {e}", file=sys.stderr)
-
-    # Priority 2: Direct HTTPS API fallback via urllib
-    url = f"https://api.github.com/repos/{owner}/{repo}/commits?since={since_utc}&until={until_utc}&per_page=100"
-    req = urllib.request.Request(url)
-    req.add_header("Accept", "application/vnd.github.v3+json")
-    req.add_header("User-Agent", "personal-timesheet-logger")
-
-    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
-    if token:
-        req.add_header("Authorization", f"Bearer {token}")
-
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            parsed = json.loads(resp.read().decode("utf-8"))
-            if isinstance(parsed, list):
-                raw_items = parsed
-    except urllib.error.HTTPError as e:
-        if e.code == 404:
-            print(f"Warning: GitHub repository {owner}/{repo} not found or requires authentication (HTTP 404).", file=sys.stderr)
-        elif e.code == 403:
-            print(f"Warning: GitHub API rate limit reached or access forbidden for {owner}/{repo} (HTTP 403). Set GITHUB_TOKEN to increase limits.", file=sys.stderr)
-        else:
-            print(f"Warning: GitHub API HTTP error {e.code} for {owner}/{repo}: {e.reason}", file=sys.stderr)
-    except Exception as e:
-        print(f"Warning: Error querying GitHub API for {owner}/{repo}: {e}", file=sys.stderr)
-
-    return normalize_api_commits(raw_items, repo, target_date, author=author, tz=tz)
+    owner, repo, target_date, author=None, tz=None, use_git_credentials=False
+):
+    """Read all default-branch pages; filter author dates by one local day."""
+    tz = tz or get_local_timezone()
+    start, end = day_bounds(target_date, tz)
+    # GitHub's since/until filters use repository commit chronology; author
+    # dates are checked again below, with an exclusive next-day boundary.
+    client = GitHubAPI(use_git_credentials)
+    raw = list(client.items(f"repos/{owner}/{repo}/commits",
+                           since=start.isoformat(), until=end.isoformat()))
+    return normalize_api_commits(raw, f"{owner}/{repo}", target_date, author, tz)
 
 
 def parse_iso_datetime(date_str: str) -> Optional[datetime.datetime]:
@@ -240,37 +184,34 @@ def parse_iso_datetime(date_str: str) -> Optional[datetime.datetime]:
         return None
 
 
-def filter_commits(
-    commits: List[Dict[str, Any]],
-    target_date: datetime.date,
-    author: Optional[str] = None,
-    tz: Optional[datetime.timezone] = None
-) -> List[Dict[str, Any]]:
-    """Filter commits by author and target date in the specified timezone."""
-    if tz is None:
-        tz = get_local_timezone()
+def filter_commits(commits, target_date, author=None, tz=None):
+    """Exact configured identities; an explicit '*' is diagnostic-only."""
+    tz = tz or get_local_timezone()
+    start, end = day_bounds(target_date, tz)
     filtered = []
-    for c in commits:
-        if author and author not in ("*", "all", ""):
-            af_lower = author.lower()
-            name = c.get("author", "").lower()
-            email = c.get("email", "").lower()
-            if af_lower not in name and af_lower not in email:
+    for commit in commits:
+        basis = None
+        if isinstance(author, dict):
+            basis = identity_match(commit, author)
+            if not basis:
                 continue
-        dt = parse_iso_datetime(c.get("timestamp", ""))
-        if not dt:
+        elif author and author not in ("*", "all"):
+            if author.casefold() not in (commit.get("author", "").casefold(), commit.get("email", "").casefold()):
+                continue
+            basis = "exact_author_override"
+        elif author in ("*", "all"):
+            basis = "explicit_all_authors"
+        timestamp = parse_iso_datetime(commit.get("timestamp", ""))
+        if not timestamp or timestamp.tzinfo is None or not start <= timestamp < end:
             continue
-        if dt.astimezone(tz).date() != target_date:
-            continue
-        filtered.append(c)
-    filtered.sort(key=lambda x: x["timestamp"])
-    return filtered
+        filtered.append({**commit, **({"identity_match": basis} if basis else {})})
+    return sorted(filtered, key=lambda commit: commit["timestamp"])
 
 
 def get_commits_for_repo(
     repo_path: str,
     target_date: datetime.date,
-    author_filter: Optional[str] = None
+    author_filter=None, tz=None
 ) -> List[Dict[str, Any]]:
     """Query git log in repo_path and return normalized commits for target_date in local timezone."""
     resolved_path = Path(repo_path).resolve()
@@ -287,12 +228,15 @@ def get_commits_for_repo(
             return []
 
     repo_name = resolved_path.name
-    local_tz = get_local_timezone()
+    local_tz = tz or get_local_timezone()
 
     # Determine author filter if not provided
-    if not author_filter:
+    if author_filter is None:
         git_user = get_git_user(str(resolved_path))
-        author_filter = git_user.get("name") or git_user.get("email")
+        author_filter = {"github_users": [], "names": [git_user["name"]] if git_user["name"] else [],
+                         "emails": [git_user["email"]] if git_user["email"] else []}
+        if not any(author_filter.values()):
+            raise SourceUnavailable("Configure an author identity before collecting local Git activity")
 
     # Delimiter for field splitting
     delimiter = "%x1f"
@@ -332,12 +276,6 @@ def get_commits_for_repo(
         subject = parts[4].strip()
         ref_decorations = parts[5].strip() if len(parts) > 5 else ""
 
-        # Filter by author if author_filter is given
-        if author_filter and author_filter not in ("*", "all", ""):
-            af_lower = author_filter.lower()
-            if af_lower not in author_name.lower() and af_lower not in author_email.lower():
-                continue
-
         # Parse commit timestamp and convert to local timezone
         commit_dt = parse_iso_datetime(date_str)
         if not commit_dt:
@@ -372,91 +310,67 @@ def get_commits_for_repo(
         })
 
     # Sort deterministically by timestamp ascending
-    commits.sort(key=lambda c: c["timestamp"])
-    return commits
+    return filter_commits(commits, target_date, author_filter, local_tz)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Collect Git commits authored on a specific date.")
-    parser.add_argument(
-        "--date",
-        type=str,
-        default=None,
-        help="Target date in YYYY-MM-DD format (default: today in local timezone)"
-    )
-    parser.add_argument(
-        "--repos",
-        nargs="+",
-        default=["."],
-        help="List of repository paths or GitHub targets (owner/repo or URL) to scan (default: current directory)"
-    )
-    parser.add_argument(
-        "--author",
-        type=str,
-        default=None,
-        help="Author name or email substring to filter commits (default: git config user.name/email; '*' or 'all' for all authors)"
-    )
-    parser.add_argument(
-        "--output",
-        "-o",
-        type=str,
-        default=None,
-        help="Output file path (JSON). If omitted, prints to stdout."
-    )
-
+    parser = argparse.ArgumentParser(description="Collect personal local/remote Git activity.")
+    parser.add_argument("--date", help="Local date YYYY-MM-DD")
+    parser.add_argument("--repos", nargs="+", default=None, help="Local paths or GitHub repositories")
+    parser.add_argument("--author", help="Exact author name/email override; '*' for diagnostic all-author collection")
+    parser.add_argument("--envelope", action="store_true", help="Include source status (used by pipeline)")
+    parser.add_argument("--output", "-o", help="Output JSON file")
+    add_settings_arguments(parser)
     args = parser.parse_args()
-
-    # Determine target date
-    if args.date:
-        try:
-            target_date = datetime.date.fromisoformat(args.date)
-        except ValueError:
-            print(f"Error: Invalid date format '{args.date}'. Expected YYYY-MM-DD.", file=sys.stderr)
-            sys.exit(1)
-    else:
-        target_date = datetime.datetime.now().astimezone().date()
-
-    local_tz = get_local_timezone()
-    author_filter = args.author
-    if author_filter is None:
-        git_user = get_git_user(".")
-        author_filter = git_user.get("name") or git_user.get("email")
-
-    all_commits: List[Dict[str, Any]] = []
-    seen_hashes = set()
-
-    for repo_target in args.repos:
-        gh_slug = parse_github_repo_slug(repo_target)
-        if gh_slug:
-            owner, repo = gh_slug
-            repo_commits = fetch_github_api_commits(
-                owner=owner,
-                repo=repo,
-                target_date=target_date,
-                author=author_filter,
-                tz=local_tz
-            )
+    try:
+        selected = settings_from_args(args)
+        date = datetime.date.fromisoformat(args.date) if args.date else datetime.datetime.now(selected["timezone"]).date()
+    except (ValueError, OSError, KeyError) as exc:
+        parser.error(str(exc))
+    try:
+        identity = selected["identity"]
+        if args.author is not None:
+            author = args.author
+            if not author.strip():
+                raise SourceUnavailable("An empty author override is not a personal identity")
         else:
-            repo_commits = get_commits_for_repo(repo_target, target_date, author_filter)
-
-        for commit in repo_commits:
-            # Deduplicate by commit hash across repo scans
-            if commit["hash"] not in seen_hashes:
-                seen_hashes.add(commit["hash"])
-                all_commits.append(commit)
-
-    # Sort globally by timestamp
-    all_commits.sort(key=lambda c: c["timestamp"])
-
-    output_json = json.dumps(all_commits, indent=2)
-
+            if not any(identity.values()):
+                current = get_git_user(".")
+                identity = {"github_users": [], "names": [current["name"]] if current["name"] else [],
+                            "emails": [current["email"]] if current["email"] else []}
+            if not any(identity.values()):
+                raise SourceUnavailable("Configure confirmed author identities; no Git identity is available")
+            author = identity
+        commits = []
+        seen = set()
+        for target in selected["repos"]:
+            slug = parse_github_repo_slug(target)
+            items = (fetch_github_api_commits(*slug, date, author, selected["timezone"], selected["use_git_credentials"])
+                     if slug else get_commits_for_repo(target, date, author, selected["timezone"]))
+            for commit in items:
+                key = (commit["repository"], commit["hash"])
+                if key not in seen:
+                    seen.add(key)
+                    commits.append(commit)
+        commits.sort(key=lambda commit: (commit["timestamp"], commit["repository"], commit["hash"]))
+        result = collection_result("git", "live", "success", commits)
+    except SourceUnavailable as exc:
+        result = collection_result("git", "live", "unavailable", reason=str(exc))
+    except GitHubAPIError as exc:
+        result = collection_result("git", "live", "error", reason=str(exc))
+    except Exception as exc:
+        result = collection_result("git", "live", "error", reason=f"Git collection failed ({type(exc).__name__})")
+    if args.envelope or result["status"] != "success":
+        return emit_result(result, args.output)
+    output = json.dumps(result["items"], indent=2)
     if args.output and args.output != "-":
-        out_path = Path(args.output)
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(output_json, encoding="utf-8")
+        path = Path(args.output)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(output, encoding="utf-8")
     else:
-        print(output_json)
+        print(output)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

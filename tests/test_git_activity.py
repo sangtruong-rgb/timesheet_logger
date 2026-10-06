@@ -90,9 +90,8 @@ class TestGitActivity(unittest.TestCase):
         ]
 
         filtered = filter_commits(commits, target, author="Sang", tz=self.tz)
-        self.assertEqual(len(filtered), 2)
+        self.assertEqual(len(filtered), 1)
         self.assertEqual(filtered[0]["hash"], "c3")
-        self.assertEqual(filtered[1]["hash"], "c4")
 
     def test_parse_github_repo_slug_urls(self):
         # HTTPS URLs with variations
@@ -180,7 +179,7 @@ class TestGitActivity(unittest.TestCase):
             raw_api_items,
             repo_name="react",
             target_date=target,
-            author="Sang",
+            author="Sang Truong",
             tz=self.tz
         )
 

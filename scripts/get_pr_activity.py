@@ -1,198 +1,160 @@
 #!/usr/bin/env python3
-"""
-get_pr_activity.py - Deterministic collector for GitHub / GitLab Pull Requests.
-
-Retrieves PR activity for the requested date:
-- Opened by author
-- Reviewed by author
-- Merged on that day
-
-Deduplicates PRs so each PR ID appears at most once in the normalized list.
-Uses authenticated gh CLI, or an explicitly selected fixture for testing.
-Outputs a source-status envelope; never substitutes fixtures for live results.
-"""
+"""Collect scoped GitHub PR references with actual, timestamped action events."""
 
 import argparse
 import datetime
-import json
-import shutil
-import subprocess
-import sys
 from typing import List, Dict, Any
 
-from collection_result import collection_result, emit_result, load_fixture_records
+from activity_settings import (add_settings_arguments, day_bounds, github_repo,
+                               parse_timestamp, settings_from_args)
+from collection_result import (SourceUnavailable, collection_result, emit_result,
+                               load_fixture_records)
+from github_api import GitHubAPI, GitHubAPIError
 
 
-def get_local_timezone() -> datetime.timezone:
+def get_local_timezone():
     return datetime.datetime.now().astimezone().tzinfo or datetime.timezone.utc
 
 
-def check_gh_cli() -> bool:
-    """Check if GitHub CLI (gh) is installed and authenticated."""
-    if not shutil.which("gh"):
-        return False
-    try:
-        res = subprocess.run(["gh", "auth", "status"], capture_output=True, text=True, check=False)
-        return res.returncode == 0
-    except Exception:
-        return False
+def deduplicate_prs(raw_prs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """One qualified PR reference, while retaining each distinct action event."""
+    priority = {"merged": 3, "opened": 2, "reviewed": 1}
+    references = {}
+    for pr in raw_prs:
+        if pr.get("id") is None:
+            continue
+        key = (pr.get("repository", ""), pr["id"])
+        if key not in references:
+            references[key] = {**pr, "events": []}
+        record = references[key]
+        if priority.get(pr.get("status"), 0) > priority.get(record.get("status"), 0):
+            for field in ("status", "timestamp", "actor"):
+                record[field] = pr.get(field)
+        events = pr.get("events")
+        if events is None:
+            events = ([{"action": pr.get("status", "opened"), "timestamp": pr["timestamp"],
+                        **({"actor": pr["actor"]} if pr.get("actor") else {})}]
+                      if pr.get("timestamp") else [])
+        for event in events:
+            if event not in record["events"]:
+                record["events"].append(dict(event))
+    for record in references.values():
+        record["events"].sort(key=lambda event: (event["timestamp"], event["action"], str(event.get("id", ""))))
+    return sorted(references.values(), key=lambda pr: (pr.get("repository", ""), str(pr["id"])))
 
 
-def check_glab_cli() -> bool:
-    """Check if GitLab CLI (glab) is installed and authenticated."""
-    if not shutil.which("glab"):
-        return False
-    try:
-        res = subprocess.run(["glab", "auth", "status"], capture_output=True, text=True, check=False)
-        return res.returncode == 0
-    except Exception:
-        return False
-
-
-def query_gh_prs(target_date: datetime.date) -> List[Dict[str, Any]]:
-    """Query GitHub PRs using gh CLI."""
-    date_str = target_date.isoformat()
+def query_gh_prs(target_date, repos=None, users=None, tz=None, client=None):
+    """Use gh-backed REST endpoints, not lossy/quoted search qualifiers."""
+    client = client or GitHubAPI()
+    tz = tz or get_local_timezone()
+    selected = list(dict.fromkeys(github_repo(repo) for repo in (repos or ["."])))
+    if not users:
+        current = client.get("user")
+        users = [current["login"]]
+    ours = {user.casefold() for user in users}
+    start, end = day_bounds(target_date, tz)
     results = []
 
-    # Queries: authored updated today, reviewed-by me updated today
-    queries = [
-        ("opened", f"author:@me created:{date_str}"),
-        ("merged", f"author:@me merged:{date_str}"),
-        ("reviewed", f"reviewed-by:@me updated:{date_str}")
-    ]
+    def is_today(value):
+        return start <= parse_timestamp(value) < end
 
-    for status_label, query in queries:
-        cmd = [
-            "gh", "search", "prs",
-            query,
-            "--json", "number,title,repository,url,updatedAt,createdAt,closedAt"
-        ]
-        res = subprocess.run(cmd, capture_output=True, text=True, check=False)
-        if res.returncode != 0:
-            raise RuntimeError(f"GitHub {status_label} query failed (exit {res.returncode})")
-        items = json.loads(res.stdout)
-        if not isinstance(items, list) or any(not isinstance(item, dict) for item in items):
-            raise ValueError(f"Invalid GitHub {status_label} response")
-        for item in items:
-            if item.get("number") is None or not isinstance(item.get("title"), str):
-                raise ValueError(f"Invalid GitHub {status_label} PR fields")
-            results.append({
-                "id": item.get("number"),
-                "repository": item.get("repository", {}).get("name", "unknown")
-                if isinstance(item.get("repository"), dict) else str(item.get("repository", "")),
-                "title": item.get("title", ""),
-                "status": status_label,
-                "url": item.get("url", ""),
-                "timestamp": item.get("updatedAt") or item.get("createdAt")
-            })
-
+    for repository in selected:
+        endpoint = f"repos/{repository}/pulls"
+        stop = False
+        for page in client.pages(endpoint, state="all", sort="updated", direction="desc"):
+            for pr in page:
+                if (not isinstance(pr.get("number"), int) or not isinstance(pr.get("title"), str)
+                        or not isinstance(pr.get("user"), dict) or not pr["user"].get("login")
+                        or not isinstance(pr.get("html_url"), str)):
+                    raise ValueError("Invalid GitHub PR fields")
+                if parse_timestamp(pr["updated_at"]) < start:
+                    stop = True
+                    break
+                author = pr["user"]["login"]
+                number = pr["number"]
+                reference = {"id": number, "repository": repository, "title": pr["title"],
+                             "url": pr["html_url"]}
+                events = []
+                if author.casefold() in ours and is_today(pr["created_at"]):
+                    events.append({"action": "opened", "timestamp": parse_timestamp(pr["created_at"]).astimezone(tz).isoformat(),
+                                   "actor": author})
+                reviews = list(client.items(f"{endpoint}/{number}/reviews"))
+                previously_reviewed = False
+                for review in reviews:
+                    reviewer = (review.get("user") or {}).get("login")
+                    if not reviewer:
+                        raise ValueError("Invalid GitHub review author")
+                    if reviewer.casefold() not in ours:
+                        continue
+                    submitted = review.get("submitted_at")
+                    if not submitted and review.get("state") == "PENDING":
+                        continue
+                    if not isinstance(review.get("id"), int):
+                        raise ValueError("Invalid GitHub review ID")
+                    review_time = parse_timestamp(submitted)
+                    merge_time = parse_timestamp(pr["merged_at"]) if pr.get("merged_at") else None
+                    previously_reviewed = previously_reviewed or bool(merge_time and review_time <= merge_time)
+                    if start <= review_time < end:
+                        events.append({"action": "reviewed", "timestamp": review_time.astimezone(tz).isoformat(),
+                                       "actor": reviewer, "id": review["id"]})
+                if pr.get("merged_at") and is_today(pr["merged_at"]):
+                    detail = client.get(f"{endpoint}/{number}")
+                    merger = (detail.get("merged_by") or {}).get("login")
+                    if author.casefold() in ours or previously_reviewed or (merger and merger.casefold() in ours):
+                        events.append({"action": "merged", "timestamp": parse_timestamp(pr["merged_at"]).astimezone(tz).isoformat(),
+                                       "actor": merger})
+                for event in events:
+                    results.append({**reference, "status": event["action"], "timestamp": event["timestamp"],
+                                    "actor": event.get("actor"), "events": [event]})
+            if stop:
+                break
     return results
 
 
-def deduplicate_prs(raw_prs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """
-    Deduplicate PRs by (repository, id).
-    If a PR is encountered multiple times with different statuses (e.g. reviewed and merged),
-    merge status with precedence: merged > opened > reviewed.
-    """
-    status_priority = {"merged": 3, "opened": 2, "reviewed": 1}
-    dedup_map: Dict[str, Dict[str, Any]] = {}
-
-    for pr in raw_prs:
-        pr_id = pr.get("id")
-        repo = pr.get("repository", "")
-        if pr_id is None:
-            continue
-        key = f"{repo}#{pr_id}" if repo else f"#{pr_id}"
-
-        if key not in dedup_map:
-            dedup_map[key] = dict(pr)
-        else:
-            existing = dedup_map[key]
-            curr_stat = pr.get("status", "")
-            exist_stat = existing.get("status", "")
-            curr_prio = status_priority.get(curr_stat, 0)
-            exist_prio = status_priority.get(exist_stat, 0)
-            if curr_prio > exist_prio:
-                existing["status"] = curr_stat
-            # Keep the earliest or most informative timestamp
-            if not existing.get("timestamp") and pr.get("timestamp"):
-                existing["timestamp"] = pr.get("timestamp")
-
-    # Return sorted deterministically by PR ID
-    results = list(dedup_map.values())
-    results.sort(key=lambda x: str(x.get("id", "")))
-    return results
-
-
-def load_fixture(fixture_path: str, target_date: datetime.date) -> List[Dict[str, Any]]:
-    """Load PRs from a JSON fixture file and filter by target date if timestamps present."""
-    data = load_fixture_records(fixture_path)
+def load_fixture(fixture_path, target_date, tz=None):
+    tz = tz or get_local_timezone()
+    start, end = day_bounds(target_date, tz)
     filtered = []
-    for item in data:
+    for item in load_fixture_records(fixture_path):
         if item.get("id") is None or not isinstance(item.get("title"), str):
             raise ValueError("PR fixture records require id and title")
-        ts = item.get("timestamp")
-        if ts:
-            try:
-                dt = datetime.datetime.fromisoformat(ts).astimezone(get_local_timezone())
-                if dt.date() == target_date:
-                    filtered.append(item)
-            except (ValueError, TypeError) as exc:
-                raise ValueError("Invalid PR fixture timestamp") from exc
-        else:
-            filtered.append(item)
+        if item.get("timestamp") and not start <= parse_timestamp(item["timestamp"]) < end:
+            continue
+        filtered.append(item)
     return filtered
 
 
-def collect_pr_activity(target_date, fixture_path=None):
+def collect_pr_activity(target_date, fixture_path=None, repos=None, users=None, tz=None, use_git_credentials=False):
     mode = "fixture" if fixture_path is not None else "live"
-    if fixture_path is None and not check_gh_cli():
-        return collection_result("github", mode, "unavailable", reason=
-                                 "Install gh and authenticate with gh auth login")
     try:
-        raw = load_fixture(fixture_path, target_date) if fixture_path is not None else query_gh_prs(target_date)
+        raw = (load_fixture(fixture_path, target_date, tz) if fixture_path is not None
+               else query_gh_prs(target_date, repos, users, tz, GitHubAPI(use_git_credentials)))
         return collection_result("github", mode, "success", deduplicate_prs(raw))
+    except SourceUnavailable as exc:
+        return collection_result("github", mode, "unavailable", reason=str(exc))
+    except GitHubAPIError as exc:
+        return collection_result("github", mode, "error", reason=str(exc))
     except Exception as exc:
-        return collection_result("github", mode, "error", reason=
-                                 f"PR collection failed ({type(exc).__name__})")
+        return collection_result("github", mode, "error", reason=f"PR collection failed ({type(exc).__name__})")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Collect PR/MR activity for a specific date.")
-    parser.add_argument(
-        "--date",
-        type=str,
-        default=None,
-        help="Target date YYYY-MM-DD (default: today)"
-    )
-    parser.add_argument(
-        "--fixture",
-        type=str,
-        default=None,
-        help="Path to fixture JSON file (used for mock/offline data)"
-    )
-    parser.add_argument(
-        "--output",
-        "-o",
-        type=str,
-        default=None,
-        help="Output file path (JSON). If omitted, prints to stdout."
-    )
-
+    parser = argparse.ArgumentParser(description="Collect scoped, multi-account GitHub PR action events.")
+    parser.add_argument("--date", help="Local date YYYY-MM-DD")
+    parser.add_argument("--repos", nargs="+", default=None, help="GitHub repos or local repos with GitHub origin")
+    parser.add_argument("--fixture", help="Explicit offline/demo PR fixture")
+    parser.add_argument("--output", "-o", help="Output JSON envelope")
+    add_settings_arguments(parser)
     args = parser.parse_args()
-
-    if args.date:
-        try:
-            target_date = datetime.date.fromisoformat(args.date)
-        except ValueError:
-            print(f"Error: Invalid date format '{args.date}'. Expected YYYY-MM-DD.", file=sys.stderr)
-            sys.exit(1)
-    else:
-        target_date = datetime.datetime.now().astimezone().date()
-
-    return emit_result(collect_pr_activity(target_date, args.fixture), args.output)
+    try:
+        selected = settings_from_args(args)
+        date = datetime.date.fromisoformat(args.date) if args.date else datetime.datetime.now(selected["timezone"]).date()
+    except (ValueError, OSError, KeyError) as exc:
+        parser.error(str(exc))
+    return emit_result(collect_pr_activity(date, args.fixture, selected["repos"],
+                                          selected["identity"]["github_users"], selected["timezone"],
+                                          selected["use_git_credentials"]), args.output)
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())
