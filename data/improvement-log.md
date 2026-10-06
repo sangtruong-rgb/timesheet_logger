@@ -1,5 +1,28 @@
 # Timesheet Skill Improvement Log
 
+## 2026-10-06 (F01 — explicit collection outcomes)
+
+Problem:
+Live PR/Calendar collection could silently substitute sample fixtures, causing invented source evidence in timesheets.
+
+Observed behavior:
+Without explicit fixture arguments, the original collectors returned two sample PRs and four sample calendar events for 2026-10-06 on a machine without the corresponding setup.
+
+Root cause:
+PR collection treated an empty list as a reason to load the default fixture, while Calendar treated unavailable/failed retrieval as a reason to load a fixture. Collector JSON lacked source status, and the pipeline hid successful subprocess stderr.
+
+Change made:
+Removed automatic fixture fallback. Added source envelopes with live/fixture provenance and success/unavailable/error status. Incomplete runs stop before time blocks/AI/final storage and save only isolated activity drafts. Explicit demos isolate timesheets and AI exports and retain provenance; successful empty live sources stay empty.
+
+Script or AI impact:
+[Script] decides source availability, errors, demo isolation, and whether final assembly is permitted. [AI] does not interpret missing sources as work.
+
+Expected token impact:
+Incomplete runs do not export new AI input. No measured token saving is claimed; run-scoped token attribution remains a separate issue.
+
+Result:
+44 tests passed (22 existing, 22 F01 regressions), including subprocess pipeline cases. A before/after CLI comparison returned 2 sample PRs / 4 sample events before the fix, versus 0 items with unavailable status and exit code 2 after it. Tests verified unchanged final timesheets, prior AI input, and token records for incomplete/demo runs. Live authenticated Google/gh accounts were not exercised. Existing interval/rerun/PR timestamp problems remain open.
+
 ## 2026-10-06
 
 Problem:

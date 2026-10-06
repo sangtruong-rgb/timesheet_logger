@@ -40,6 +40,7 @@ The full ordered sequence and deterministic breakdown are specified in:
    ```bash
    python3 scripts/run_pipeline.py --date <YYYY-MM-DD> --export-ai-input data/raw/ai_input_<YYYY-MM-DD>.json
    ```
+   If the command returns exit code **2**, read the source-status diagnostics and the **INCOMPLETE** activity draft under `data/timesheets/drafts/`. Report missing setup/errors and stop; do not read an older AI payload or claim that a final timesheet was generated. Never enable sample fixtures implicitly. Explicit fixture runs are **DEMO** and use isolated `demo/` output paths printed by the pipeline; use those paths for the remaining steps.
 
 3. **Read Minimal AI Input**:
    Inspect `data/raw/ai_input_<YYYY-MM-DD>.json`.

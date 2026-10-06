@@ -17,8 +17,8 @@ This document defines the complete daily execution sequence for the **Personal P
 | :---: | :---: | :--- | :--- | :--- |
 | **1** | `[Script]` | **Resolve Date & Timezone** | Parse `--date YYYY-MM-DD` or detect local date & timezone offset (e.g. `+07:00`). | Deterministic calendar math. |
 | **2** | `[Script]` | **Collect Git Commits** | Query local repos via `git log --all --date=iso-strict` or remote GitHub repos (`owner/repo`, HTTPS/SSH URLs) via GitHub REST API (`gh api` or direct HTTPS). Filter by author and local target date, extracting hashes and commit messages. | Deterministic log filtering, URL slug parsing, and API query execution. |
-| **3** | `[Script]` | **Collect PR Activity** | Query GitHub (`gh` / API) or GitLab (`glab` / API) for PRs opened, reviewed, or merged today. | Deterministic API query and status extraction. |
-| **4** | `[Script]` | **Collect Calendar Events** | Retrieve Google Calendar events or parse exported `.ics` / local fixture for the day. | Deterministic calendar API/file parsing. |
+| **3** | `[Script]` | **Collect PR Activity** | Query authenticated GitHub `gh`, or a fixture only when explicitly selected. Emit live/fixture provenance and success/unavailable/error; a failed subquery makes collection unsuccessful. | Deterministic API query and source status extraction. |
+| **4** | `[Script]` | **Collect Calendar Events** | Use an authorized Google token or explicitly selected fixture. Emit source status; missing setup and request failures never turn into sample data. | Deterministic calendar API/file parsing and source status extraction. |
 | **5** | `[Script]` | **Normalize & Deduplicate** | Strip all extraneous API metadata. Deduplicate PRs by ID, merge status conflicts, and eliminate duplicated commits. | Deterministic set/dict operations. |
 | **6** | `[Script]` | **Construct Time Blocks** | Interleave calendar events with standard workday intervals (`09:00–12:00`, `13:30–17:30`). If no calendar events exist, apply deterministic morning/afternoon split rule. | Pure scheduling interval segmentation. |
 | **7** | `[Script]` | **Associate Activities** | Match commit and PR timestamps against time block intervals (`start <= timestamp < end`). | Deterministic timestamp interval comparison. |
@@ -31,6 +31,12 @@ This document defines the complete daily execution sequence for the **Personal P
 | **14** | `[Script]` | **Record Token Usage** | Scan Claude Code transcripts under `~/.claude/*.jsonl` or session logs. Extract input/output/cache token metrics and update `data/token-usage.csv`. | Deterministic JSONL parsing and CSV aggregation. |
 
 ---
+
+## Collection Outcome Gate
+
+Before time blocking or AI, `[Script]` checks the PR/Calendar envelopes. A successful empty list remains empty. If either source is unavailable or failed, save only collected evidence as an **INCOMPLETE** draft under `data/timesheets/drafts/`, return exit code 2, and stop. Final timesheets, AI exports, and token records are untouched.
+
+If both sources succeed but any fixture was explicitly selected, mark the run **DEMO**, isolate timesheet/manifests under `data/timesheets/demo/`, isolate AI exports under a sibling `demo/` directory, and skip production token updates. Successful live runs retain source metadata in their entry JSON and daily collection manifest. Existing Git collection failures are not yet covered by this source gate.
 
 ## 3. Token Budget
 

@@ -8,19 +8,19 @@ Retrieves PR activity for the requested date:
 - Merged on that day
 
 Deduplicates PRs so each PR ID appears at most once in the normalized list.
-Supports gh CLI, glab CLI, direct API tokens, and fixture fallback for offline/test environments.
+Uses authenticated gh CLI, or an explicitly selected fixture for testing.
+Outputs a source-status envelope; never substitutes fixtures for live results.
 """
 
 import argparse
 import datetime
 import json
-import os
 import shutil
 import subprocess
 import sys
-import urllib.request
-from pathlib import Path
-from typing import List, Dict, Any, Optional, Set
+from typing import List, Dict, Any
+
+from collection_result import collection_result, emit_result, load_fixture_records
 
 
 def get_local_timezone() -> datetime.timezone:
@@ -67,22 +67,24 @@ def query_gh_prs(target_date: datetime.date) -> List[Dict[str, Any]]:
             query,
             "--json", "number,title,repository,url,updatedAt,createdAt,closedAt"
         ]
-        try:
-            res = subprocess.run(cmd, capture_output=True, text=True, check=False)
-            if res.returncode == 0 and res.stdout.strip():
-                items = json.loads(res.stdout)
-                for item in items:
-                    results.append({
-                        "id": item.get("number"),
-                        "repository": item.get("repository", {}).get("name", "unknown")
-                        if isinstance(item.get("repository"), dict) else str(item.get("repository", "")),
-                        "title": item.get("title", ""),
-                        "status": status_label,
-                        "url": item.get("url", ""),
-                        "timestamp": item.get("updatedAt") or item.get("createdAt")
-                    })
-        except Exception as e:
-            print(f"Warning: gh query failed for {query}: {e}", file=sys.stderr)
+        res = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        if res.returncode != 0:
+            raise RuntimeError(f"GitHub {status_label} query failed (exit {res.returncode})")
+        items = json.loads(res.stdout)
+        if not isinstance(items, list) or any(not isinstance(item, dict) for item in items):
+            raise ValueError(f"Invalid GitHub {status_label} response")
+        for item in items:
+            if item.get("number") is None or not isinstance(item.get("title"), str):
+                raise ValueError(f"Invalid GitHub {status_label} PR fields")
+            results.append({
+                "id": item.get("number"),
+                "repository": item.get("repository", {}).get("name", "unknown")
+                if isinstance(item.get("repository"), dict) else str(item.get("repository", "")),
+                "title": item.get("title", ""),
+                "status": status_label,
+                "url": item.get("url", ""),
+                "timestamp": item.get("updatedAt") or item.get("createdAt")
+            })
 
     return results
 
@@ -125,29 +127,35 @@ def deduplicate_prs(raw_prs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 def load_fixture(fixture_path: str, target_date: datetime.date) -> List[Dict[str, Any]]:
     """Load PRs from a JSON fixture file and filter by target date if timestamps present."""
-    p = Path(fixture_path)
-    if not p.exists():
-        return []
-    try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-        if isinstance(data, list):
-            # If timestamp present, filter for date, else return all fixture entries
-            filtered = []
-            for item in data:
-                ts = item.get("timestamp")
-                if ts:
-                    try:
-                        dt = datetime.datetime.fromisoformat(ts).astimezone(get_local_timezone())
-                        if dt.date() == target_date:
-                            filtered.append(item)
-                    except Exception:
-                        filtered.append(item)
-                else:
+    data = load_fixture_records(fixture_path)
+    filtered = []
+    for item in data:
+        if item.get("id") is None or not isinstance(item.get("title"), str):
+            raise ValueError("PR fixture records require id and title")
+        ts = item.get("timestamp")
+        if ts:
+            try:
+                dt = datetime.datetime.fromisoformat(ts).astimezone(get_local_timezone())
+                if dt.date() == target_date:
                     filtered.append(item)
-            return filtered
-    except Exception as e:
-        print(f"Warning: Failed to load PR fixture {fixture_path}: {e}", file=sys.stderr)
-    return []
+            except (ValueError, TypeError) as exc:
+                raise ValueError("Invalid PR fixture timestamp") from exc
+        else:
+            filtered.append(item)
+    return filtered
+
+
+def collect_pr_activity(target_date, fixture_path=None):
+    mode = "fixture" if fixture_path is not None else "live"
+    if fixture_path is None and not check_gh_cli():
+        return collection_result("github", mode, "unavailable", reason=
+                                 "Install gh and authenticate with gh auth login")
+    try:
+        raw = load_fixture(fixture_path, target_date) if fixture_path is not None else query_gh_prs(target_date)
+        return collection_result("github", mode, "success", deduplicate_prs(raw))
+    except Exception as exc:
+        return collection_result("github", mode, "error", reason=
+                                 f"PR collection failed ({type(exc).__name__})")
 
 
 def main():
@@ -183,30 +191,8 @@ def main():
     else:
         target_date = datetime.datetime.now().astimezone().date()
 
-    raw_prs: List[Dict[str, Any]] = []
-
-    # Priority 1: Explicit fixture file if supplied
-    if args.fixture:
-        raw_prs = load_fixture(args.fixture, target_date)
-    else:
-        # Priority 2: Check gh CLI
-        if check_gh_cli():
-            raw_prs = query_gh_prs(target_date)
-        # Priority 3: Check default fixture directory if exists
-        default_fixture = Path("data/fixtures/sample_prs.json")
-        if not raw_prs and default_fixture.exists():
-            raw_prs = load_fixture(str(default_fixture), target_date)
-
-    normalized_prs = deduplicate_prs(raw_prs)
-    output_json = json.dumps(normalized_prs, indent=2)
-
-    if args.output and args.output != "-":
-        out_path = Path(args.output)
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(output_json, encoding="utf-8")
-    else:
-        print(output_json)
+    return emit_result(collect_pr_activity(target_date, args.fixture), args.output)
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
