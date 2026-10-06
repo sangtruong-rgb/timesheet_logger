@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+
+# Environment and Credentials
+.env
+*.env
+*.key
+*.pem
+credentials.json
+token.json
+client_secret*.json
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Local logs & caches
+.cache/
+*.log
