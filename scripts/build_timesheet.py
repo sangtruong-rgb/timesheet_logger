@@ -23,6 +23,21 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 
 
+import re
+
+TICKET_PATTERN = re.compile(r'\b([A-Z]{2,10}-[0-9]+)\b')
+
+
+def extract_tickets(texts: List[str]) -> List[str]:
+    """Extract unique Jira/linear ticket identifiers such as PAY-123 or PROJ-456."""
+    tickets = set()
+    for t in texts:
+        matches = TICKET_PATTERN.findall(t)
+        for m in matches:
+            tickets.add(m)
+    return sorted(list(tickets))
+
+
 def format_pr_suffix(prs: List[Dict[str, Any]]) -> str:
     """Deterministically format PR suffix: 'PRs: #101, #102' or 'PRs: None'."""
     if not prs:
@@ -58,6 +73,9 @@ def synthesize_deterministic_summary(block: Dict[str, Any]) -> str:
     pr_titles = [p.get("title", "").strip() for p in prs if p.get("title", "").strip()]
 
     combined = commit_msgs + pr_titles
+    tickets = extract_tickets(combined)
+    ticket_prefix = f"[{', '.join(tickets)}] " if tickets else ""
+
     if combined:
         first = combined[0]
         # Clean prefix if any (e.g. feat: fix: chore:)
@@ -67,11 +85,11 @@ def synthesize_deterministic_summary(block: Dict[str, Any]) -> str:
                 cleaned = cleaned[len(prefix):].strip()
         cleaned = cleaned.capitalize()
         if len(combined) > 1:
-            summary_parts.append(f"{cleaned} and related improvements")
+            summary_parts.append(f"{ticket_prefix}{cleaned} and related improvements")
         else:
-            summary_parts.append(cleaned)
+            summary_parts.append(f"{ticket_prefix}{cleaned}")
     else:
-        summary_parts.append("Project development and focus tasks")
+        summary_parts.append(f"{ticket_prefix}Project development and focus tasks".strip())
 
     text = ". ".join(summary_parts)
     if not text.endswith("."):

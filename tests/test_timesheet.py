@@ -59,6 +59,27 @@ class TestTimesheet(unittest.TestCase):
         self.assertEqual(len(entries[0]["sources"]["commits"]), 1)
         self.assertEqual(len(entries[0]["sources"]["pull_requests"]), 1)
 
+    def test_deterministic_ticket_prefix(self):
+        blocks = [
+            {
+                "date": "2026-10-06",
+                "start_time": "14:00",
+                "end_time": "16:00",
+                "duration_minutes": 120,
+                "calendar_titles": [],
+                "commits": [
+                    {"message": "PAY-123 fix invoice validation"},
+                    {"message": "PAY-123 add invoice unit tests"}
+                ],
+                "prs": []
+            }
+        ]
+        entries = build_entries(blocks, ai_judgments=None)
+        self.assertEqual(len(entries), 1)
+        desc = entries[0]["entry"]["description"]
+        self.assertIn("[PAY-123]", desc)
+        self.assertTrue(desc.endswith("PRs: None"))
+
     def test_idempotent_upsert(self):
         entry_a = {
             "entry": {"date": "2026-10-06", "start": "09:00", "end": "09:30", "duration_minutes": 30, "description": "Standup. PRs: None"},
