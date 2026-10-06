@@ -24,12 +24,12 @@ import json
 import sys
 from pathlib import Path
 from typing import List, Dict, Any, Optional
+from activity_settings import add_timezone_arguments, timezone_settings, resolve_timezone
 
 
 def get_local_timezone_str() -> str:
-    now = datetime.datetime.now().astimezone()
-    tz = now.strftime("%z")
-    return f"{tz[:3]}:{tz[3:]}" if len(tz) == 5 else tz
+    """Compatibility helper returning the profile's authoritative named zone."""
+    return timezone_settings()[0]
 
 
 def clean_commits(raw_commits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -92,10 +92,12 @@ def normalize_all(
     calendar: List[Dict[str, Any]],
     timezone_str: Optional[str] = None
 ) -> Dict[str, Any]:
+    zone_name = timezone_str if timezone_str is not None else get_local_timezone_str()
+    resolve_timezone(zone_name, allow_legacy_offset=True)
     events = clean_calendar(calendar)
     return {
         "date": target_date,
-        "timezone": timezone_str or get_local_timezone_str(),
+        "timezone": zone_name,
         "calendar": [ev for ev in events if not ev.get("all_day")],
         "calendar_context": [ev for ev in events if ev.get("all_day")],
         "commits": clean_commits(commits),
@@ -105,6 +107,7 @@ def normalize_all(
 
 def main():
     parser = argparse.ArgumentParser(description="Normalize daily activity data into compact model.")
+    add_timezone_arguments(parser)
     parser.add_argument("--date", type=str, default=None, help="Target date YYYY-MM-DD (default: today)")
     parser.add_argument("--commits-file", type=str, default=None, help="Path to raw commits JSON file")
     parser.add_argument("--prs-file", type=str, default=None, help="Path to raw PRs JSON file")
@@ -114,10 +117,12 @@ def main():
 
     args = parser.parse_args()
 
-    if args.date:
-        target_date_str = args.date
-    else:
-        target_date_str = datetime.datetime.now().astimezone().date().isoformat()
+    try:
+        zone_name, tz = timezone_settings(args.config, args.timezone)
+        target_date_str = args.date or datetime.datetime.now(tz).date().isoformat()
+        datetime.date.fromisoformat(target_date_str)
+    except (ValueError, OSError) as exc:
+        parser.error(str(exc))
 
     commits = []
     prs = []
@@ -149,7 +154,7 @@ def main():
         (raw_path / f"raw_prs_{target_date_str}.json").write_text(json.dumps(prs, indent=2), encoding="utf-8")
         (raw_path / f"raw_calendar_{target_date_str}.json").write_text(json.dumps(calendar, indent=2), encoding="utf-8")
 
-    normalized = normalize_all(target_date_str, commits, prs, calendar)
+    normalized = normalize_all(target_date_str, commits, prs, calendar, zone_name)
     if collection_sources:
         normalized["collection_sources"] = collection_sources
     output_json = json.dumps(normalized, indent=2)

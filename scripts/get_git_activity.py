@@ -21,14 +21,14 @@ import sys
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 
-from activity_settings import add_settings_arguments, day_bounds, identity_match, settings_from_args
+from activity_settings import add_settings_arguments, day_bounds, identity_match, settings_from_args, timezone_settings
 from collection_result import SourceUnavailable, collection_result, emit_result
 from github_api import GitHubAPI, GitHubAPIError, check_gh_cli
 
 
-def get_local_timezone() -> datetime.timezone:
-    """Return local timezone from system clock."""
-    return datetime.datetime.now().astimezone().tzinfo or datetime.timezone.utc
+def get_local_timezone() -> datetime.tzinfo:
+    """Compatibility helper: return the configured named timezone, not host offset."""
+    return timezone_settings()[1]
 
 
 def get_git_user(repo_path: Optional[str] = None) -> Dict[str, str]:
@@ -119,7 +119,7 @@ def normalize_api_commits(
     repo_name: str,
     target_date: datetime.date,
     author: Optional[str] = None,
-    tz: Optional[datetime.timezone] = None
+    tz: Optional[datetime.tzinfo] = None
 ) -> List[Dict[str, Any]]:
     """
     Normalize GitHub REST API commit objects and filter by date and author in timezone tz.
@@ -141,6 +141,8 @@ def normalize_api_commits(
         commit_dt = parse_iso_datetime(date_str)
         if not commit_dt:
             continue
+        if commit_dt.tzinfo is None:
+            raise ValueError("GitHub author timestamps must include a timezone")
         local_dt = commit_dt.astimezone(tz)
 
         normalized.append({
@@ -278,7 +280,7 @@ def get_commits_for_repo(
 
         # Parse commit timestamp and convert to local timezone
         commit_dt = parse_iso_datetime(date_str)
-        if not commit_dt:
+        if not commit_dt or commit_dt.tzinfo is None:
             continue
 
         local_commit_dt = commit_dt.astimezone(local_tz)

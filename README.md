@@ -64,6 +64,45 @@ An explicit `--config PATH` overrides the default profile. Only identity, reposi
 timezone, and Git credential-helper opt-in are wired in this profile; the legacy example's
 workday, Calendar adapter paths, and token options are still separate audit work.
 
+### One timezone for every entry point
+
+Git, PR, Calendar, normalization, date resolution, blocks, and the standalone token
+collector share `activity_settings.py`. Selection is **CLI `--timezone` > profile
+`timezone` > `Asia/Ho_Chi_Minh`**. The profile is loaded relative to the repository,
+not the current directory; the host clock's timezone and first source offset do not
+select the day's zone. Calendar, normalizer and token CLIs also accept `--config`.
+The normalized model persists that zone for block construction; a builder uses
+the model's explicit zone, or the profile for a legacy model missing it.
+Use IANA names such as `America/New_York`, so historical dates get their own DST
+offset. Invalid explicit zones stop before output writes rather than falling back.
+
+Day boundaries are `[00:00, next-day 00:00)` in that named zone, then converted to
+UTC for GitHub and usage filtering. Such a day can be 23 or 25 elapsed hours across
+DST. Calendar requests carry the zone name and per-boundary offsets. An aware event
+keeps its instant; a Calendar wall time without an offset uses its `timeZone`, or
+the selected zone when no source zone is present. Ambiguous/nonexistent DST wall
+times fail collection rather than inheriting the host zone or guessing an instant.
+Legacy normalized models with explicit `+07:00` offsets remain supported as fixed
+offsets; new profiles/CLI input require named zones. Regenerate old exports to
+include the selected IANA name; old data is not automatically rewritten.
+
+```bash
+python3 scripts/get_calendar_activity.py --config config/user-config.json --date 2026-10-06
+python3 scripts/normalize_activity.py --config config/user-config.json --date 2026-10-06 \
+  --commits-file commits.json --prs-file prs.json --calendar-file calendar.json
+python3 scripts/collect_token_usage.py --config config/user-config.json --date 2026-10-06 \
+  --session-file /path/to/session.jsonl --csv-path data/audit/session-tokens.csv
+```
+
+Token parsing uses each usage line's aware `timestamp` and the same local-day bounds,
+not file mtime or all-session totals relabeled as the requested day. Missing/invalid
+or timezone-less timestamps are skipped with diagnostics and do not establish zero
+usage; CSV notes retain the selected zone. This fixes daily timezone attribution,
+not run/session attribution: the pipeline still does not automatically collect a
+run's actual AI usage (F22), and deduplication/schema hardening remains F25/F26.
+Existing token CSV rows are not automatically migrated; use a separate audit CSV
+when checking historical records.
+
 Known GitHub author logins take priority. A foreign linked login cannot match your name
 alias. Unlinked/local commits match exact configured email or name aliases, and retain
 `identity_match` provenance. Name aliases are less conclusive than account/email identity;

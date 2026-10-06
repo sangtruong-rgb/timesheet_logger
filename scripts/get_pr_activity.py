@@ -6,14 +6,14 @@ import datetime
 from typing import List, Dict, Any
 
 from activity_settings import (add_settings_arguments, day_bounds, github_repo,
-                               parse_timestamp, settings_from_args)
+                               parse_timestamp, settings_from_args, timezone_settings)
 from collection_result import (SourceUnavailable, collection_result, emit_result,
                                load_fixture_records)
 from github_api import GitHubAPI, GitHubAPIError
 
 
 def get_local_timezone():
-    return datetime.datetime.now().astimezone().tzinfo or datetime.timezone.utc
+    return timezone_settings()[1]
 
 
 def deduplicate_prs(raw_prs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

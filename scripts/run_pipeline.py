@@ -122,6 +122,8 @@ def run():
     print(f">> [3/6] Collecting Calendar events for {date_str}...")
     cal_cmd = [sys.executable, str(scripts_dir / "get_calendar_activity.py"), "--date", date_str,
                "--timezone", selected["timezone_name"]]
+    if args.config:
+        cal_cmd += ["--config", args.config]
     if args.calendar_fixture:
         cal_cmd += ["--fixture", args.calendar_fixture]
     cal_result = run_source_collector(cal_cmd, "google_calendar", "fixture" if args.calendar_fixture is not None else "live")
@@ -207,7 +209,7 @@ def run():
     }, indent=2), encoding="utf-8")
 
     # Step 9: Token usage tracking
-    print(">> [6/6] Checking token tracking...")
+    print(f">> [6/6] Checking token tracking for {date_str} ({selected['timezone_name']})...")
     from collect_token_usage import update_csv
     if not demo:
         update_csv(Path("data/token-usage.csv"), [])

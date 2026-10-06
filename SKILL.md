@@ -34,6 +34,7 @@ The full ordered sequence and deterministic breakdown are specified in:
 
 1. **Determine Target Date**:
    Extract target date from the user prompt (`YYYY-MM-DD`). If none is specified, use today's date in the profile's IANA timezone. Load `config/user-config.json` when present, or pass an explicit `--config`; use all confirmed account/name/email aliases and the same repository selection for Git and PRs.
+   Every entry point uses CLI `--timezone` > profile `timezone` > `Asia/Ho_Chi_Minh`, independent of the host zone. Use a named IANA zone for historical DST dates. Keep the same `--config`/`--timezone` overrides in both phases and standalone Calendar/normalization/token commands. Invalid zones stop the run; never substitute the host timezone. Legacy fixed-offset daily models remain supported without rewriting old files.
 
 2. **Execute Deterministic Pipeline (Phase 1)**:
    Run the orchestrator script to collect and prepare the minimal AI payload:
@@ -76,4 +77,5 @@ The full ordered sequence and deterministic breakdown are specified in:
    Display the generated timesheet summary from `data/timesheets/<YYYY-MM-DD>.md` and point to the audit JSON in `data/timesheets/<YYYY-MM-DD>.json`. Retain the scheduled/estimated labels and proposed-time notice. Scheduled Calendar time does not confirm attendance; estimated time is not measured work time.
    If overlap is marked, report that source collection can be complete while attendance needs review. The saved output is a proposal; do not present it as confirmed meeting time. Attendance selection is a separate human review, not an AI decision.
    Unmatched commits/PR actions appear under **Unassigned activity — review required** and in `<YYYY-MM-DD>.activity-review.json`, linked from the collection manifest. They contribute no duration. Source collection can be COMPLETE while assignment review is required; report both statuses. Do not turn a day containing only unmatched activity into an assumed workday. Breaktime/OT labels remain deferred.
+   Standalone token collection uses aware per-line timestamps in the selected timezone and skips missing/invalid/naive timestamps with diagnostics. A successful timesheet pipeline does not prove that actual run-scoped AI token usage was recorded; that integration remains F22. Do not report a missing timestamp or an empty initialized CSV as verified zero usage.
    All-day context is shown below the Markdown rows and stored in `data/timesheets/<YYYY-MM-DD>.calendar-context.json` when present. It is not work duration or an automatic day-off decision and is excluded from AI block summaries. Timed events crossing midnight are shown only for the requested day, using `24:00` as its midnight end; preserve original source boundaries for audit.

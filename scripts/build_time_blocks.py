@@ -30,8 +30,8 @@ import json
 import sys
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from block_identity import BlockIdentityError
+from activity_settings import resolve_timezone, timezone_settings
 
 
 def parse_dt(ts_str: str) -> Optional[datetime.datetime]:
@@ -54,8 +54,14 @@ def calculate_minutes(start_dt: datetime.datetime, end_dt: datetime.datetime) ->
 
 def build_time_blocks(normalized_data: Dict[str, Any], *, unassigned_activity=None) -> List[Dict[str, Any]]:
     """Build timed proposals; callers persisting evidence must collect unassigned_activity."""
+    try:
+        tz = (resolve_timezone(normalized_data["timezone"], allow_legacy_offset=True)
+              if "timezone" in normalized_data else timezone_settings()[1])
+    except (ValueError, OSError) as exc:
+        raise BlockIdentityError("Daily model requires a valid named timezone or legacy UTC offset") from exc
     target_date_str = normalized_data.get("date", "")
-    target_date = datetime.date.fromisoformat(target_date_str) if target_date_str else datetime.date.today()
+    target_date = datetime.date.fromisoformat(target_date_str) if target_date_str else datetime.datetime.now(tz).date()
+    target_date_str = target_date.isoformat()
 
     calendar = [ev for ev in normalized_data.get("calendar", [])
                 if not ev.get("all_day") and not (len(ev.get("start", "")) == 10 and len(ev.get("end", "")) == 10)]
@@ -71,23 +77,6 @@ def build_time_blocks(normalized_data: Dict[str, Any], *, unassigned_activity=No
         else:
             prs.append(reference)
 
-    # Extract timezone from calendar or commits or default to system
-    tz = datetime.datetime.now().astimezone().tzinfo or datetime.timezone.utc
-    if calendar and parse_dt(calendar[0].get("start")):
-        tz = parse_dt(calendar[0]["start"]).tzinfo or tz
-    elif commits and parse_dt(commits[0].get("timestamp")):
-        tz = parse_dt(commits[0]["timestamp"]).tzinfo or tz
-    if normalized_data.get("timezone"):
-        value = normalized_data["timezone"]
-        try:
-            tz = ZoneInfo(value)
-        except (ZoneInfoNotFoundError, TypeError, ValueError):
-            try:
-                tz = datetime.datetime.fromisoformat("2000-01-01T00:00:00" + value).tzinfo
-                if tz is None:
-                    raise ValueError("Missing timezone")
-            except (TypeError, ValueError) as exc:
-                raise BlockIdentityError("Daily Calendar scope requires an IANA zone or UTC offset") from exc
     daily_start = datetime.datetime.combine(target_date, datetime.time.min, tzinfo=tz)
     daily_end = datetime.datetime.combine(target_date + datetime.timedelta(days=1), datetime.time.min, tzinfo=tz)
     # Keep original source extents, but construct blocks only for the target day.

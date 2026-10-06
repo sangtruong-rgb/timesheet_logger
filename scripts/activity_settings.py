@@ -8,6 +8,35 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 DEFAULT_CONFIG = Path(__file__).resolve().parent.parent / "config/user-config.json"
+DEFAULT_TIMEZONE = "Asia/Ho_Chi_Minh"
+
+
+def resolve_timezone(value, *, allow_legacy_offset=False):
+    """New configuration uses named zones; old normalized models may keep fixed offsets."""
+    if not isinstance(value, str) or not value:
+        raise ValueError("timezone must be a nonempty IANA timezone name")
+    if allow_legacy_offset and re.fullmatch(r"[+-][0-9]{2}:[0-9]{2}", value):
+        hours, minutes = int(value[1:3]), int(value[4:6])
+        if hours > 23 or minutes > 59:
+            raise ValueError("Invalid legacy timezone offset")
+        delta = datetime.timedelta(hours=hours, minutes=minutes)
+        return datetime.timezone(delta if value[0] == "+" else -delta)
+    try:
+        return ZoneInfo(value)
+    except (KeyError, ValueError) as exc:
+        raise ValueError("timezone must be a valid IANA timezone name") from exc
+
+
+def timezone_settings(config_path=None, override=None):
+    """CLI override > profile > named project default, never host timezone."""
+    config = load_config(config_path)
+    name = override if override is not None else config.get("timezone", DEFAULT_TIMEZONE)
+    return name, resolve_timezone(name)
+
+
+def add_timezone_arguments(parser):
+    parser.add_argument("--config", help="JSON profile (default: config/user-config.json if present)")
+    parser.add_argument("--timezone", help="IANA timezone (CLI override > profile > Asia/Ho_Chi_Minh)")
 
 
 def string_list(value, field):
@@ -31,10 +60,8 @@ def settings(config, repos=None, users=None, names=None, emails=None, timezone=N
     github = config.get("github", {})
     if not isinstance(author, dict) or not isinstance(github, dict):
         raise ValueError("author and github configuration must be objects")
-    tz_name = timezone or config.get("timezone", "Asia/Ho_Chi_Minh")
-    if not isinstance(tz_name, str) or not tz_name:
-        raise ValueError("timezone must be a nonempty IANA timezone name")
-    tz = ZoneInfo(tz_name)
+    tz_name = timezone if timezone is not None else config.get("timezone", DEFAULT_TIMEZONE)
+    tz = resolve_timezone(tz_name)
     identity = {
         "github_users": string_list(users if users is not None else github.get("users", []), "github.users"),
         "names": string_list(names if names is not None else author.get("names", [author["name"]] if author.get("name") else []), "author.names"),
@@ -56,11 +83,10 @@ def settings(config, repos=None, users=None, names=None, emails=None, timezone=N
 
 
 def add_settings_arguments(parser):
-    parser.add_argument("--config", help="JSON profile (default: config/user-config.json if present)")
+    add_timezone_arguments(parser)
     parser.add_argument("--github-users", nargs="+", help="GitHub logins belonging to one person")
     parser.add_argument("--authors", nargs="+", help="Exact confirmed Git author name aliases")
     parser.add_argument("--author-emails", nargs="+", help="Exact confirmed Git author emails")
-    parser.add_argument("--timezone", help="IANA timezone (default: Asia/Ho_Chi_Minh)")
     parser.add_argument("--use-git-credentials", action="store_true", default=None,
                         help="Opt in to the existing Git credential helper for github.com")
 

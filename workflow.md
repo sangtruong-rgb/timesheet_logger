@@ -31,6 +31,19 @@ This document defines the complete daily execution sequence for the **Personal P
 | **13** | `[Script]` | **Daily Reconciliation & Storage** | Reconcile the full generated daily set while preserving manual rows/overrides and refusing ownership conflicts. Save all-day context in a separate daily sidecar and Markdown context section; it contributes no duration. Context changes/deletions update on successful snapshots; validation/source failures preserve existing final/context/AI/token files. Exact reruns preserve bytes. | Deterministic daily reconciliation, context validation and successful-collection gate. |
 | **14** | `[Script]` | **Record Token Usage** | Scan Claude Code transcripts under `~/.claude/*.jsonl` or session logs. Extract input/output/cache token metrics and update `data/token-usage.csv`. | Deterministic JSONL parsing and CSV aggregation. |
 
+All entry points share timezone precedence: CLI override, then profile, then the
+named default `Asia/Ho_Chi_Minh`. Day/date resolution never uses host-zone or
+first-source inference. Calendar/normalizer/token standalone CLIs accept the same
+configuration; historical bounds use IANA DST rules. Old normalized fixed offsets
+remain compatible but are not guessed to be named zones. Ambiguous/nonexistent
+Calendar wall times without an offset fail rather than being guessed.
+
+Step 14 is available through the standalone token CLI: usage lines are filtered by
+their aware timestamps within the same UTC-converted local-day bounds; missing or
+invalid timestamps are reported and skipped. The orchestrator currently initializes
+the usage CSV without collecting actual run usage. Automatic run/session attribution
+remains F22, and run isolation remains F24 and deduplication/schema validation remain F25/F26.
+
 Activity association uses aware timestamps within the selected day's `[start,end)`
 intervals. Unmatched commits and individual PR actions are retained separately with
 reasons; no arbitrary fallback block is selected. No-Calendar candidate windows
