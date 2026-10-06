@@ -11,7 +11,12 @@ from pathlib import Path
 # Add scripts directory to path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
-from get_git_activity import parse_iso_datetime, filter_commits
+from get_git_activity import (
+    parse_iso_datetime,
+    filter_commits,
+    parse_github_repo_slug,
+    normalize_api_commits
+)
 from normalize_activity import clean_commits
 
 
@@ -27,6 +32,12 @@ class TestGitActivity(unittest.TestCase):
         self.assertEqual(dt.day, 6)
         self.assertEqual(dt.hour, 10)
         self.assertEqual(dt.minute, 24)
+
+        # Test Z UTC format common in GitHub API
+        dt_z = parse_iso_datetime("2026-10-06T03:00:00Z")
+        self.assertIsNotNone(dt_z)
+        self.assertEqual(dt_z.hour, 3)
+        self.assertEqual(dt_z.tzinfo, datetime.timezone.utc)
 
     def test_midnight_timezone_boundary(self):
         # 23:59:00 on Oct 6 in UTC+7
@@ -82,6 +93,137 @@ class TestGitActivity(unittest.TestCase):
         self.assertEqual(len(filtered), 2)
         self.assertEqual(filtered[0]["hash"], "c3")
         self.assertEqual(filtered[1]["hash"], "c4")
+
+    def test_parse_github_repo_slug_urls(self):
+        # HTTPS URLs with variations
+        self.assertEqual(
+            parse_github_repo_slug("https://github.com/octocat/Hello-World"),
+            ("octocat", "Hello-World")
+        )
+        self.assertEqual(
+            parse_github_repo_slug("https://github.com/octocat/Hello-World.git"),
+            ("octocat", "Hello-World")
+        )
+        self.assertEqual(
+            parse_github_repo_slug("https://github.com/facebook/react/"),
+            ("facebook", "react")
+        )
+        self.assertEqual(
+            parse_github_repo_slug("https://github.com/facebook/react/tree/main"),
+            ("facebook", "react")
+        )
+        # SSH URLs
+        self.assertEqual(
+            parse_github_repo_slug("git@github.com:torvalds/linux.git"),
+            ("torvalds", "linux")
+        )
+        self.assertEqual(
+            parse_github_repo_slug("git@github.com:torvalds/linux"),
+            ("torvalds", "linux")
+        )
+
+    def test_parse_github_repo_slug_bare_and_local(self):
+        # Bare slug (non-existing local path)
+        self.assertEqual(
+            parse_github_repo_slug("octocat/Spoon-Knife"),
+            ("octocat", "Spoon-Knife")
+        )
+        # Local paths should return None
+        self.assertIsNone(parse_github_repo_slug("."))
+        self.assertIsNone(parse_github_repo_slug("./scripts"))
+        self.assertIsNone(parse_github_repo_slug("tests"))
+        self.assertIsNone(parse_github_repo_slug("/tmp/nonexistent"))
+        self.assertIsNone(parse_github_repo_slug(""))
+
+    def test_normalize_api_commits(self):
+        target = datetime.date(2026, 10, 6)
+        raw_api_items = [
+            {
+                "sha": "1234567890abcdef1234567890abcdef12345678",
+                "commit": {
+                    "author": {
+                        "name": "Sang Truong",
+                        "email": "sang@corp.com",
+                        # 03:00 UTC = 10:00 UTC+7 on 2026-10-06
+                        "date": "2026-10-06T03:00:00Z"
+                    },
+                    "message": "feat: integrate github api commit fetching\n\nDetailed explanation."
+                }
+            },
+            {
+                # Other author on same day
+                "sha": "abcdef1234567890abcdef1234567890abcdef12",
+                "commit": {
+                    "author": {
+                        "name": "Alice Bob",
+                        "email": "alice@corp.com",
+                        "date": "2026-10-06T04:00:00Z"
+                    },
+                    "message": "fix: update docs"
+                }
+            },
+            {
+                # Same author, yesterday
+                "sha": "9999999990abcdef1234567890abcdef12345678",
+                "commit": {
+                    "author": {
+                        "name": "Sang Truong",
+                        "email": "sang@corp.com",
+                        "date": "2026-10-05T03:00:00Z"
+                    },
+                    "message": "chore: old commit"
+                }
+            }
+        ]
+
+        normalized = normalize_api_commits(
+            raw_api_items,
+            repo_name="react",
+            target_date=target,
+            author="Sang",
+            tz=self.tz
+        )
+
+        self.assertEqual(len(normalized), 1)
+        c = normalized[0]
+        self.assertEqual(c["repository"], "react")
+        self.assertEqual(c["hash"], "1234567890abcdef1234567890abcdef12345678")
+        self.assertEqual(c["short_hash"], "1234567")
+        self.assertEqual(c["author"], "Sang Truong")
+        self.assertEqual(c["email"], "sang@corp.com")
+        self.assertEqual(c["message"], "feat: integrate github api commit fetching")
+        self.assertTrue(c["timestamp"].startswith("2026-10-06T10:00:00"))
+
+    def test_normalize_api_commits_all_authors(self):
+        target = datetime.date(2026, 10, 6)
+        raw_api_items = [
+            {
+                "sha": "commit1",
+                "commit": {
+                    "author": {"name": "Alice", "email": "alice@test.com", "date": "2026-10-06T02:00:00Z"},
+                    "message": "Alice commit"
+                }
+            },
+            {
+                "sha": "commit2",
+                "commit": {
+                    "author": {"name": "Bob", "email": "bob@test.com", "date": "2026-10-06T03:00:00Z"},
+                    "message": "Bob commit"
+                }
+            }
+        ]
+
+        # Author filter "*" should return commits from all authors on target date
+        normalized = normalize_api_commits(
+            raw_api_items,
+            repo_name="sample-repo",
+            target_date=target,
+            author="*",
+            tz=self.tz
+        )
+        self.assertEqual(len(normalized), 2)
+        self.assertEqual(normalized[0]["hash"], "commit1")
+        self.assertEqual(normalized[1]["hash"], "commit2")
 
 
 if __name__ == "__main__":
