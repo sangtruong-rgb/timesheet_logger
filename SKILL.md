@@ -53,6 +53,7 @@ The full ordered sequence and deterministic breakdown are specified in:
    - Return exactly one summary per selected `block_id`; copy IDs from the input without changing them. Output order does not matter. Calendar-only blocks can be omitted and use their own deterministic fallback.
    - Do not append the `PRs:` suffix; the script assembles it from that block's evidence.
    - Describe only supplied evidence. An `estimated` interval is a work-time proposal based on activity timestamps; do not claim continuous work for its whole duration. Calendar-only fallback repeats the event title without inventing discussion topics.
+   - `calendar_overlap: true` means conflicting scheduled events, with `attendance: unconfirmed`. Do not infer which event was attended or claim simultaneous attendance. Keep the attendance-review notice; the script also adds it independently of AI text.
    - Return structured JSON in this format:
      ```json
      [
@@ -73,3 +74,4 @@ The full ordered sequence and deterministic breakdown are specified in:
 
 6. **Confirm to User**:
    Display the generated timesheet summary from `data/timesheets/<YYYY-MM-DD>.md` and point to the audit JSON in `data/timesheets/<YYYY-MM-DD>.json`. Retain the scheduled/estimated labels and proposed-time notice. Scheduled Calendar time does not confirm attendance; estimated time is not measured work time.
+   If overlap is marked, report that source collection can be complete while attendance needs review. The saved output is a proposal; do not present it as confirmed meeting time. Attendance selection is a separate human review, not an AI decision.

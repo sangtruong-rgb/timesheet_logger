@@ -152,7 +152,6 @@ def run():
 
     # Step 5: Build time blocks
     from build_time_blocks import build_time_blocks
-    blocks = build_time_blocks(normalized)
 
     # Step 6: Prepare minimal AI input
     from prepare_ai_input import prepare_all_blocks
@@ -161,6 +160,7 @@ def run():
     from build_timesheet import build_entries, load_ai_judgments
     ai_payload = None
     try:
+        blocks = build_time_blocks(normalized)
         ai_payload = prepare_all_blocks(blocks)
         entries = build_entries(blocks, load_ai_judgments(args.ai_output))
     except BlockIdentityError as exc:
@@ -206,6 +206,9 @@ def run():
     print("\n DEMO completed — explicitly selected fixtures; output isolated under demo/."
           if demo else "\n Pipeline run successfully completed!")
     print(f" Collection manifest: {manifest_path}")
+    overlap_count = sum(bool(entry.get("calendar_overlap")) for entry in entries)
+    if overlap_count:
+        print(f" REVIEW REQUIRED: {overlap_count} Calendar overlap interval(s) need attendance confirmation. Output is a proposal.")
     if "dates" in save_result and date_str in save_result["dates"]:
         info = save_result["dates"][date_str]
         print(f" Timesheet JSON: {info['json_path']}")
