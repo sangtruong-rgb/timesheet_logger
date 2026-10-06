@@ -5,8 +5,8 @@ build_time_blocks.py - Deterministic time blocking and activity association.
 Rules:
 1. When calendar events exist:
    - Calendar events define explicit blocks (meetings, stand-ups, focus time).
-   - Significant work gaps between meetings within standard workday (09:00 - 18:00)
-     are segmented into development blocks if activity exists or calendar spans it.
+   - Development gaps require a timestamped commit/PR inside their interval.
+     These durations are estimated, not proof of continuous work.
 2. When NO calendar events exist (deterministic fallback):
    - Inspect commit and PR timestamps.
    - If activity exists only in morning (< 12:30): block is 09:00–12:30.
@@ -67,6 +67,14 @@ def build_time_blocks(normalized_data: Dict[str, Any]) -> List[Dict[str, Any]]:
         tz = parse_dt(commits[0]["timestamp"]).tzinfo or tz
 
     blocks: List[Dict[str, Any]] = []
+    block_bounds = []
+
+    def has_activity(start, end):
+        for activity in [*commits, *prs]:
+            timestamp = parse_dt(activity.get("timestamp"))
+            if timestamp and timestamp.tzinfo is not None and start <= timestamp < end:
+                return True
+        return False
 
     # CASE A: Calendar events exist
     if calendar:
@@ -94,8 +102,8 @@ def build_time_blocks(normalized_data: Dict[str, Any]) -> List[Dict[str, Any]]:
                 "end": e
             })
 
-        # Interleave gap blocks if there are gaps >= 45 minutes between meetings
-        # and inside working hours
+        # Candidate gaps use the existing workday/lunch rules and 30-minute minimum;
+        # timestamped activity evidence is checked below.
         timeline: List[Dict[str, Any]] = []
         cur_cursor = day_start
 
@@ -156,15 +164,22 @@ def build_time_blocks(normalized_data: Dict[str, Any]) -> List[Dict[str, Any]]:
         for item in timeline:
             s_dt = item["start"]
             e_dt = item["end"]
+            estimated = item["type"] == "development"
+            if estimated and not has_activity(s_dt, e_dt):
+                continue
             blocks.append({
                 "date": target_date_str,
                 "start_time": format_hhmm(s_dt),
                 "end_time": format_hhmm(e_dt),
                 "duration_minutes": calculate_minutes(s_dt, e_dt),
-                "calendar_titles": [item["title"]] if item.get("title") else [],
+                "calendar_titles": [item["title"]] if not estimated and item.get("title") else [],
+                "block_type": item["type"],
+                "time_basis": "estimated" if estimated else "scheduled",
+                **({"estimation_reason": "calendar_gap_with_activity"} if estimated else {}),
                 "commits": [],
                 "prs": []
             })
+            block_bounds.append((s_dt, e_dt))
 
     # CASE B: Fallback when NO Calendar events exist
     else:
@@ -198,7 +213,7 @@ def build_time_blocks(normalized_data: Dict[str, Any]) -> List[Dict[str, Any]]:
                 "start_time": format_hhmm(s1),
                 "end_time": format_hhmm(e1),
                 "duration_minutes": calculate_minutes(s1, e1),
-                "calendar_titles": ["Morning Development"],
+                "calendar_titles": [],
                 "commits": [],
                 "prs": []
             })
@@ -207,7 +222,7 @@ def build_time_blocks(normalized_data: Dict[str, Any]) -> List[Dict[str, Any]]:
                 "start_time": format_hhmm(s2),
                 "end_time": format_hhmm(e2),
                 "duration_minutes": calculate_minutes(s2, e2),
-                "calendar_titles": ["Afternoon Development"],
+                "calendar_titles": [],
                 "commits": [],
                 "prs": []
             })
@@ -219,7 +234,7 @@ def build_time_blocks(normalized_data: Dict[str, Any]) -> List[Dict[str, Any]]:
                 "start_time": format_hhmm(s),
                 "end_time": format_hhmm(e),
                 "duration_minutes": calculate_minutes(s, e),
-                "calendar_titles": ["Afternoon Development"],
+                "calendar_titles": [],
                 "commits": [],
                 "prs": []
             })
@@ -231,30 +246,38 @@ def build_time_blocks(normalized_data: Dict[str, Any]) -> List[Dict[str, Any]]:
                 "start_time": format_hhmm(s),
                 "end_time": format_hhmm(e),
                 "duration_minutes": calculate_minutes(s, e),
-                "calendar_titles": ["Development"],
+                "calendar_titles": [],
                 "commits": [],
                 "prs": []
             })
 
-    # Associate commits with blocks based on timestamp
+    if not calendar:
+        for block in blocks:
+            block["block_type"] = "development"
+            block["time_basis"] = "estimated"
+            block["estimation_reason"] = "activity_workday_window"
+            start = datetime.datetime.combine(target_date, datetime.time.fromisoformat(block["start_time"]), tzinfo=tz)
+            end = datetime.datetime.combine(target_date, datetime.time.fromisoformat(block["end_time"]), tzinfo=tz)
+            block_bounds.append((start, end))
+
+    # Use the same aware intervals for qualifying gap evidence and direct assignment.
     unassigned_commits = []
     for c in commits:
         c_dt = parse_dt(c.get("timestamp"))
         assigned = False
-        if c_dt:
-            c_time_str = format_hhmm(c_dt)
-            for b in blocks:
-                if b["start_time"] <= c_time_str < b["end_time"]:
+        if c_dt and c_dt.tzinfo is not None:
+            for b, (start, end) in zip(blocks, block_bounds):
+                if start <= c_dt < end:
                     b["commits"].append(c)
                     assigned = True
                     break
         if not assigned:
             unassigned_commits.append(c)
 
-    # Distribute unassigned commits to the closest development block
+    # Existing unmatched-activity fallback remains pending F08 review.
     if unassigned_commits and blocks:
         # Find development block or first available block
-        dev_blocks = [b for b in blocks if "Development" in "".join(b["calendar_titles"]) or "Focus" in "".join(b["calendar_titles"])]
+        dev_blocks = [b for b in blocks if b.get("block_type") == "development" or "Focus" in "".join(b["calendar_titles"])]
         target_b = dev_blocks[0] if dev_blocks else blocks[-1]
         for c in unassigned_commits:
             target_b["commits"].append(c)
@@ -264,10 +287,9 @@ def build_time_blocks(normalized_data: Dict[str, Any]) -> List[Dict[str, Any]]:
     for p in prs:
         p_dt = parse_dt(p.get("timestamp"))
         assigned = False
-        if p_dt:
-            p_time_str = format_hhmm(p_dt)
-            for b in blocks:
-                if b["start_time"] <= p_time_str < b["end_time"]:
+        if p_dt and p_dt.tzinfo is not None:
+            for b, (start, end) in zip(blocks, block_bounds):
+                if start <= p_dt < end:
                     b["prs"].append(p)
                     assigned = True
                     break

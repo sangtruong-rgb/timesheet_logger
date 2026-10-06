@@ -44,7 +44,7 @@ The full ordered sequence and deterministic breakdown are specified in:
 
 3. **Read Minimal AI Input**:
    Inspect `data/raw/ai_input_<YYYY-MM-DD>.json`.
-   Each payload carries a stable `block_id` derived from date/start/end, plus compact block times, calendar titles, commit messages, and PR titles. No git hashes, author info, or raw metadata are present. Copy the exact `block_id` when returning a summary.
+   Each payload carries a stable `block_id` derived from date/start/end, plus `time_basis`, compact block times, actual calendar titles, commit messages, and PR titles. No git hashes, author info, or raw metadata are present. Copy the exact `block_id` when returning a summary.
 
 4. **Perform AI Topic Synthesis**:
    For each block that has commits or PRs:
@@ -52,6 +52,7 @@ The full ordered sequence and deterministic breakdown are specified in:
    - Write a concise, professional summary (e.g., *"Customer import improvements covering CSV validation, malformed-row handling, and tests"*).
    - Return exactly one summary per selected `block_id`; copy IDs from the input without changing them. Output order does not matter. Calendar-only blocks can be omitted and use their own deterministic fallback.
    - Do not append the `PRs:` suffix; the script assembles it from that block's evidence.
+   - Describe only supplied evidence. An `estimated` interval is a work-time proposal based on activity timestamps; do not claim continuous work for its whole duration. Calendar-only fallback repeats the event title without inventing discussion topics.
    - Return structured JSON in this format:
      ```json
      [
@@ -71,4 +72,4 @@ The full ordered sequence and deterministic breakdown are specified in:
    ```
 
 6. **Confirm to User**:
-   Display the generated timesheet summary from `data/timesheets/<YYYY-MM-DD>.md` and point to the audit JSON in `data/timesheets/<YYYY-MM-DD>.json`.
+   Display the generated timesheet summary from `data/timesheets/<YYYY-MM-DD>.md` and point to the audit JSON in `data/timesheets/<YYYY-MM-DD>.json`. Retain the scheduled/estimated labels and proposed-time notice. Scheduled Calendar time does not confirm attendance; estimated time is not measured work time.

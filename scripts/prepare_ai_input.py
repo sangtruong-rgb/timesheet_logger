@@ -44,6 +44,7 @@ def prepare_ai_payload_for_block(block: Dict[str, Any]) -> Dict[str, Any]:
 
     payload = {
       "block_id": get_block_id(block.get("date"), block.get("start_time"), block.get("end_time")),
+      **({"time_basis": block["time_basis"]} if "time_basis" in block else {}),
       "date": block.get("date", ""),
       "block": {
         "start": block.get("start_time", ""),
