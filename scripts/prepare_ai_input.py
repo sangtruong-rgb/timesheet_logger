@@ -19,6 +19,7 @@ import re
 import sys
 from pathlib import Path
 from typing import List, Dict, Any, Optional
+from block_identity import get_block_id, index_blocks
 
 TICKET_PATTERN = re.compile(r'\b([A-Z]{2,10}-[0-9]+)\b')
 
@@ -42,6 +43,7 @@ def prepare_ai_payload_for_block(block: Dict[str, Any]) -> Dict[str, Any]:
     ticket_ids = extract_tickets(all_text)
 
     payload = {
+      "block_id": get_block_id(block.get("date"), block.get("start_time"), block.get("end_time")),
       "date": block.get("date", ""),
       "block": {
         "start": block.get("start_time", ""),
@@ -59,6 +61,7 @@ def prepare_ai_payload_for_block(block: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def prepare_all_blocks(blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    index_blocks(blocks)
     payloads = []
     for b in blocks:
         # If there are no commits and no PRs, and calendar title is known, AI judgment is minimal or skipped

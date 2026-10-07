@@ -40,26 +40,29 @@ The full ordered sequence and deterministic breakdown are specified in:
    ```bash
    python3 scripts/run_pipeline.py --date <YYYY-MM-DD> --export-ai-input data/raw/ai_input_<YYYY-MM-DD>.json
    ```
-   If the command returns exit code **2**, read the source-status diagnostics and the **INCOMPLETE** activity draft under `data/timesheets/drafts/`. Report missing setup/errors and stop; do not read an older AI payload or claim that a final timesheet was generated. Never enable sample fixtures implicitly. Explicit fixture runs are **DEMO** and use isolated `demo/` output paths printed by the pipeline; use those paths for the remaining steps.
+   If the command returns exit code **2**, read the diagnostics and draft path printed by the pipeline. A failed source creates an **INCOMPLETE** draft; AI/block validation or daily reconciliation failures create a **REVIEW REQUIRED** draft. Report the reason and stop; do not read an older AI payload or claim that a final timesheet was generated. Never enable sample fixtures implicitly. Explicit fixture runs are **DEMO** and use isolated `demo/` output paths printed by the pipeline; use those paths for the remaining steps.
 
 3. **Read Minimal AI Input**:
    Inspect `data/raw/ai_input_<YYYY-MM-DD>.json`.
-   Notice that it contains only compact block times, calendar titles, commit messages, and PR titles. No git hashes, author info, or raw metadata are present.
+   Each payload carries a stable `block_id` derived from date/start/end, plus compact block times, calendar titles, commit messages, and PR titles. No git hashes, author info, or raw metadata are present. Copy the exact `block_id` when returning a summary.
 
 4. **Perform AI Topic Synthesis**:
    For each block that has commits or PRs:
    - Group semantically related activities into 1–2 coherent topics.
    - Write a concise, professional summary (e.g., *"Customer import improvements covering CSV validation, malformed-row handling, and tests"*).
+   - Return exactly one summary per selected `block_id`; copy IDs from the input without changing them. Output order does not matter. Calendar-only blocks can be omitted and use their own deterministic fallback.
+   - Do not append the `PRs:` suffix; the script assembles it from that block's evidence.
    - Return structured JSON in this format:
      ```json
      [
        {
-         "block": {"start": "09:30", "end": "12:00"},
+         "block_id": "2026-10-06_09:30_12:00",
          "description": "Customer import improvements covering CSV validation, malformed-row handling, and tests."
        }
      ]
      ```
    *(Save to `data/raw/ai_judgment_<YYYY-MM-DD>.json`)*
+   Unknown/stale IDs, duplicate summaries, inconsistent dates/intervals and malformed output are rejected. Position-only summaries are unsupported. Legacy `{date, block: {start, end}, description}` output requires an exact current match; date-less legacy intervals are accepted only for a single target day with unique candidate intervals.
 
 5. **Execute Final Assembly & Idempotent Save (Phase 2)**:
    Pass the AI judgment back to the pipeline:

@@ -21,6 +21,7 @@ import json
 import sys
 from pathlib import Path
 from typing import List, Dict, Any, Optional
+from block_identity import BlockIdentityError, get_block_id, index_blocks
 
 
 import re
@@ -97,33 +98,82 @@ def synthesize_deterministic_summary(block: Dict[str, Any]) -> str:
     return text
 
 
+class AIJudgmentError(BlockIdentityError):
+    """Requested AI output cannot be safely mapped to the current candidate blocks."""
+
+
+def load_ai_judgments(path):
+    """An explicitly requested missing/invalid file must not silently become fallback."""
+    if path is None:
+        return None
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise AIJudgmentError("Cannot read requested AI output as valid JSON") from exc
+    if not isinstance(data, list):
+        raise AIJudgmentError("Requested AI output must be a JSON array")
+    return data
+
+
+def map_ai_judgments(block_by_id, judgments):
+    """Prefer explicit IDs; support only exact, unambiguous legacy interval matches."""
+    if judgments is None:
+        return {}
+    if not isinstance(judgments, list):
+        raise AIJudgmentError("AI output must be a JSON array of keyed summaries")
+    mapped = {}
+    dates = {block["date"] for block in block_by_id.values()}
+    for item in judgments:
+        if not isinstance(item, dict) or not isinstance(item.get("description"), str) or not item["description"].strip():
+            raise AIJudgmentError("Each AI summary requires an object with a nonempty description")
+        if "block_id" in item:
+            key = item["block_id"]
+            if not isinstance(key, str) or key not in block_by_id:
+                raise AIJudgmentError("Unknown or stale AI block_id")
+        else:
+            interval = item.get("block")
+            if not isinstance(interval, dict) or "start" not in interval or "end" not in interval:
+                raise AIJudgmentError("AI summaries require block_id or explicit legacy block boundaries; positional output is unsupported")
+            if "date" in item:
+                date = item["date"]
+            elif len(dates) == 1:
+                date = next(iter(dates))
+            else:
+                raise AIJudgmentError("Date-less legacy summaries require a single target day")
+            key = get_block_id(date, interval["start"], interval["end"])
+            if key not in block_by_id:
+                raise AIJudgmentError("Legacy AI interval does not match a current block")
+        block = block_by_id[key]
+        if "date" in item and item["date"] != block["date"]:
+            raise AIJudgmentError("AI date conflicts with its block_id")
+        if "block" in item:
+            interval = item["block"]
+            if (not isinstance(interval, dict) or interval.get("start") != block["start_time"]
+                    or interval.get("end") != block["end_time"]):
+                raise AIJudgmentError("AI boundaries conflict with their block_id")
+        if key in mapped:
+            raise AIJudgmentError("Duplicate AI summary for the same block")
+        mapped[key] = item
+    return mapped
+
+
 def build_entries(
     blocks: List[Dict[str, Any]],
     ai_judgments: Optional[List[Dict[str, Any]]] = None
 ) -> List[Dict[str, Any]]:
     entries = []
 
-    # Map AI judgments by block index or (start, end)
-    ai_by_key: Dict[str, Dict[str, Any]] = {}
-    if ai_judgments:
-        for idx, item in enumerate(ai_judgments):
-            block_meta = item.get("block", {})
-            start = block_meta.get("start")
-            end = block_meta.get("end")
-            if start and end:
-                ai_by_key[f"{start}-{end}"] = item
-            ai_by_key[f"idx_{idx}"] = item
+    block_by_id = index_blocks(blocks)
+    ai_by_key = map_ai_judgments(block_by_id, ai_judgments)
 
-    for idx, b in enumerate(blocks):
+    for key, b in block_by_id.items():
         date_str = b.get("date", "")
         start_time = b.get("start_time", "")
         end_time = b.get("end_time", "")
-        key = f"{start_time}-{end_time}"
-        idx_key = f"idx_{idx}"
 
         # Resolve topic summary
         topic_summary = ""
-        ai_match = ai_by_key.get(key) or ai_by_key.get(idx_key)
+        ai_match = ai_by_key.get(key)
         if ai_match and ai_match.get("description"):
             topic_summary = ai_match["description"].strip()
             if not topic_summary.endswith("."):
@@ -136,6 +186,8 @@ def build_entries(
         full_description = f"{topic_summary} {pr_suffix}"
 
         entry_record = {
+            "block_id": key,
+            "summary_source": "ai" if ai_match else "fallback",
             "entry": {
                 "date": date_str,
                 "start": start_time,
@@ -167,13 +219,12 @@ def main():
         print(f"Error: {args.blocks_file} not found.", file=sys.stderr)
         sys.exit(1)
 
-    blocks = json.loads(b_path.read_text(encoding="utf-8"))
-
-    ai_data = None
-    if args.ai_output and Path(args.ai_output).exists():
-        ai_data = json.loads(Path(args.ai_output).read_text(encoding="utf-8"))
-
-    entries = build_entries(blocks, ai_data)
+    try:
+        blocks = json.loads(b_path.read_text(encoding="utf-8"))
+        entries = build_entries(blocks, load_ai_judgments(args.ai_output))
+    except (BlockIdentityError, OSError, json.JSONDecodeError) as exc:
+        print(f"AI/block validation failed: {exc}", file=sys.stderr)
+        return 2
     out_json = json.dumps(entries, indent=2)
 
     if args.output and args.output != "-":
@@ -182,7 +233,8 @@ def main():
         out_p.write_text(out_json, encoding="utf-8")
     else:
         print(out_json)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
