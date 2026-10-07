@@ -52,7 +52,7 @@ class TestPipelineEvidenceBlocks(unittest.TestCase):
 
     def snapshot(self):
         return {p: p.read_bytes() for p in (self.output / f"{DATE}.json", self.output / f"{DATE}.md",
-            self.output / f"{DATE}.collection.json", self.ai, self.directory / "data/token-usage.csv")}
+            self.output / f"{DATE}.collection.json", self.ai)}
 
     def test_calendar_only_pipeline_outputs_one_faithful_scheduled_row(self):
         self.assertEqual(self.pipeline([event()]), 0, self.stderr.getvalue())
@@ -61,7 +61,7 @@ class TestPipelineEvidenceBlocks(unittest.TestCase):
         self.assertEqual(rows[0]["entry"]["duration_minutes"], 30)
         self.assertEqual(rows[0]["entry"]["description"], "Daily stand-up. PRs: None")
         self.assertEqual(rows[0]["time_basis"], "scheduled")
-        self.assertEqual(json.loads(self.ai.read_text())["blocks"][0]["time_basis"], "scheduled")
+        self.assertEqual(json.loads(self.ai.read_text())["blocks"], [])
 
     def test_supported_gap_is_explicit_estimate_in_json_markdown_and_ai_input(self):
         self.assertEqual(self.pipeline([event(), event("13:30", "14:00", "Planning")], [commit()]), 0)
@@ -114,7 +114,7 @@ class TestPipelineEvidenceBlocks(unittest.TestCase):
         self.assertEqual(sum(r["entry"]["duration_minutes"] for r in rows), 420)
         collected = [c for r in rows for c in r["sources"]["commits"]]
         self.assertEqual([{key: c[key] for key in activities[0]} for c in collected], activities)
-        self.assertEqual([r["block_id"] for r in rows], [b["block_id"] for b in json.loads(self.ai.read_text())["blocks"]])
+        self.assertEqual([r["block_id"] for r in rows if r["sources"]["commits"] or r["sources"]["pull_requests"]], [b["block_id"] for b in json.loads(self.ai.read_text())["blocks"]])
         self.assertIn("**Total Proposed Time:** 420 mins", (self.output / f"{DATE}.md").read_text())
 
     def test_existing_generated_cross_lunch_row_is_replaced_by_two_segments(self):
@@ -153,7 +153,7 @@ class TestPipelineEvidenceBlocks(unittest.TestCase):
         self.assertEqual(rows[1]["review"]["attendance"], "unconfirmed")
         self.assertEqual(rows[1]["sources"]["calendar_events"], events)
         self.assertEqual(len(rows[1]["sources"]["commits"]), 1)
-        self.assertTrue(json.loads(self.ai.read_text())["blocks"][1]["calendar_overlap"])
+        self.assertTrue(json.loads(self.ai.read_text())["blocks"][0]["calendar_overlap"])
         self.assertIn("**Total Proposed Time:** 90 mins", (self.output / f"{DATE}.md").read_text())
         self.assertIn("REVIEW REQUIRED", self.stdout.getvalue())
         manifest = json.loads((self.output / f"{DATE}.collection.json").read_text())

@@ -18,7 +18,9 @@ from run_pipeline import run
 class TestPipelineTimezone(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
-        self.directory=Path(self.temp.name);self.output=self.directory/'timesheets';self.ai=self.directory/'ai.json'
+        self.directory=Path(self.temp.name)
+        token = self.directory / "data/token-usage.csv"
+        token.parent.mkdir(); token.write_text("PROTECTED TOKEN RECORDS");self.output=self.directory/'timesheets';self.ai=self.directory/'ai.json'
         self.config=self.directory/'profile.json';self.config.write_text(json.dumps({'timezone':'America/New_York',
             'repositories':['test/project'],'author':{'names':['Me']},'github':{'users':['me']}}))
         self.calls=[]

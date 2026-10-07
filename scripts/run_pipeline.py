@@ -19,6 +19,7 @@ Flow:
 import argparse
 import datetime
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -26,11 +27,58 @@ from pathlib import Path
 from collection_result import collection_result, source_metadata
 from activity_settings import add_settings_arguments, settings_from_args
 from calendar_settings import add_calendar_arguments, calendar_settings
+from output_paths import validate_auxiliary_output, OutputPathError
+
+
+def protected_input_paths(args):
+    """Protect configured input/store paths without requiring valid source setup."""
+    root = Path(__file__).resolve().parent.parent
+    paths = [root / "token.json", root / "credentials.json", root / "data/token-usage.csv"]
+    for name in ("snapshot", "ai_output", "config", "prs_fixture", "calendar_fixture",
+                 "calendar_token", "calendar_credentials", "usage_run_manifest", "token_csv_path"):
+        value = getattr(args, name, None)
+        if value:
+            paths.append(Path(value).expanduser() if name in ("calendar_token", "calendar_credentials", "token_csv_path") else value)
+    for name in ("GOOGLE_CALENDAR_TOKEN", "GOOGLE_CALENDAR_CREDENTIALS", "TIMESHEET_TOKEN_CSV"):
+        if os.environ.get(name):
+            paths.append(Path(os.environ[name]).expanduser())
+    profile = Path(args.config) if args.config else root / "config/user-config.json"
+    paths.append(profile)
+    try:
+        data = json.loads(profile.read_text(encoding="utf-8"))
+        for section, fields in (("calendar", ("token_path", "google_token_path", "credentials_path", "google_credentials_path")),
+                                ("token_tracking", ("csv_path",))):
+            settings = data.get(section, {})
+            if isinstance(settings, dict):
+                for field in fields:
+                    value = settings.get(field)
+                    if isinstance(value, str) and value.strip():
+                        path = Path(value).expanduser()
+                        paths.append(path if path.is_absolute() else profile.resolve().parent / path)
+    except (OSError, ValueError, AttributeError):
+        pass  # Assembly may intentionally ignore unavailable source configuration.
+    manifest = getattr(args, "usage_run_manifest", None)
+    if manifest:
+        try:
+            value = json.loads(Path(manifest).read_text(encoding="utf-8")).get("session_file")
+            if isinstance(value, str) and value:
+                path = Path(value).expanduser()
+                paths.append(path if path.is_absolute() else Path(manifest).resolve().parent / path)
+        except (OSError, ValueError, AttributeError):
+            pass  # Token attribution validates malformed manifests separately.
+    return paths
+
+
+def check_ai_export(args, path):
+    validate_auxiliary_output(path, protected_paths=protected_input_paths(args))
 
 
 def run_source_collector(command, source, mode):
     """Keep source failures distinct from a successfully collected empty list."""
-    response = subprocess.run(command, capture_output=True, text=True, check=False)
+    try:
+        response = subprocess.run(command, capture_output=True, text=True, check=False, timeout=120)
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return collection_result(source, mode, "error", reason=f"Collector could not complete ({type(exc).__name__})")
     if response.stderr:
         print(response.stderr.rstrip(), file=sys.stderr)
     try:
@@ -89,6 +137,9 @@ def save_activity_draft(date_str, normalized, collection, output_dir, storage_re
 def run():
     parser = argparse.ArgumentParser(description="Run the end-to-end timesheet pipeline.")
     parser.add_argument("--date", type=str, default=None, help="Target date YYYY-MM-DD (default: today)")
+    parser.add_argument("--phase", choices=("run", "prepare", "assemble"), default="run")
+    parser.add_argument("--snapshot", help="Immutable snapshot output for prepare, input for assemble")
+    parser.add_argument("--max-ai-input-bytes", type=int, default=12000)
     parser.add_argument("--repos", nargs="+", default=None, help="Repositories shared by Git and PR collection")
     parser.add_argument("--max-local-commits", type=int, default=10000)
     parser.add_argument("--max-remote-commits", type=int, default=10000)
@@ -101,6 +152,29 @@ def run():
     parser.add_argument("--output-dir", type=str, default="data/timesheets", help="Timesheet output directory")
 
     args = parser.parse_args()
+    if args.export_ai_input:
+        try:
+            check_ai_export(args, args.export_ai_input)
+        except (OutputPathError, OSError) as exc:
+            print(f" OUTPUT PATH BLOCKED: {exc}; final files were not written.", file=sys.stderr)
+            return 2
+    if args.phase == "assemble":
+        if not args.snapshot:
+            parser.error("assemble requires --snapshot; source collection is never repeated")
+        try:
+            from activity_snapshot import read_snapshot
+            frozen = read_snapshot(args.snapshot)
+            normalized, collection = frozen["normalized"], frozen["collection"]
+            date_str = normalized["date"]
+            if args.date is not None and args.date != date_str:
+                raise ValueError("Requested date conflicts with the frozen snapshot")
+            output = Path(args.output_dir) / "demo" if collection["status"] == "demo" else Path(args.output_dir)
+            return assemble_activity(args, date_str, normalized, collection, output, frozen=frozen)
+        except (ValueError, OSError) as exc:
+            print(f" SNAPSHOT BLOCKED: {exc}", file=sys.stderr)
+            return 2
+    if args.phase == "prepare" and args.ai_output:
+        parser.error("prepare does not assemble AI output; use --phase assemble with the prepared snapshot")
     try:
         selected = settings_from_args(args)
         calendar_options = calendar_settings(args.config, args.calendar_token, args.calendar_credentials, args.calendar_ids)
@@ -179,6 +253,11 @@ def run():
         print(" Final timesheets, AI input, and token records were not written.")
         return 2
 
+    return assemble_activity(args, date_str, normalized, collection, output_dir)
+
+
+def assemble_activity(args, date_str, normalized, collection, output_dir, *, frozen=None):
+    demo = collection["status"] == "demo"
     # Step 5: Build time blocks
     from build_time_blocks import build_time_blocks
 
@@ -187,11 +266,26 @@ def run():
     from block_identity import BlockIdentityError
     # Step 7: Build entries
     from build_timesheet import build_entries, load_ai_judgments
-    ai_payload = None
-    unassigned_activity = []
+    ai_payload = frozen["ai_input"] if frozen else None
+    unassigned_activity = frozen["unassigned_activity"] if frozen else []
     try:
-        blocks = build_time_blocks(normalized, unassigned_activity=unassigned_activity)
-        ai_payload = prepare_activity_input(blocks, unassigned_activity)
+        blocks = frozen["blocks"] if frozen else build_time_blocks(normalized, unassigned_activity=unassigned_activity)
+        if not frozen:
+            ai_payload = prepare_activity_input(blocks, unassigned_activity, args.max_ai_input_bytes)
+        if args.phase == "prepare":
+            from activity_snapshot import save_snapshot
+            snapshot_path = Path(args.snapshot) if args.snapshot else Path(args.output_dir).parent / "runs" / f"{date_str}-{datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S%f')}.json"
+            if demo:
+                snapshot_path = snapshot_path.parent / "demo" / snapshot_path.name
+            ai_export = Path(args.export_ai_input) if args.export_ai_input else None
+            if ai_export and demo:
+                ai_export = ai_export.parent / "demo" / ai_export.name
+            if ai_export:
+                check_ai_export(args, ai_export)
+            snapshot = save_snapshot(snapshot_path, normalized, collection, blocks, unassigned_activity, ai_payload, ai_export)
+            print(f" PREPARED immutable snapshot: {snapshot_path}")
+            print(f" Run ID: {snapshot['run_id']}; no final timesheet or token file written.")
+            return 0
         entries = build_entries(blocks, load_ai_judgments(args.ai_output))
     except BlockIdentityError as exc:
         draft = save_activity_draft(date_str, normalized, collection, output_dir,
@@ -207,39 +301,31 @@ def run():
     # Step 8: Save idempotently
     print(">> [5/6] Saving timesheet idempotently...")
     from save_timesheet import save_timesheet, TimesheetReconciliationError
+    extra_files = {}
+    if args.export_ai_input:
+        ai_path = Path(args.export_ai_input)
+        if demo:
+            ai_path = ai_path.parent / "demo" / ai_path.name
+        try:
+            check_ai_export(args, ai_path)
+        except (OutputPathError, OSError) as exc:
+            print(f" OUTPUT PATH BLOCKED: {exc}; final files were not written.", file=sys.stderr)
+            return 2
+        extra_files[ai_path] = ai_payload_json
     try:
         save_result = save_timesheet(entries, str(output_dir), target_date=date_str,
                                      collection_status=collection["status"], calendar_context=normalized["calendar_context"],
-                                     unassigned_activity=unassigned_activity)
+                                     unassigned_activity=unassigned_activity, collection_manifest=collection, extra_files=extra_files)
     except TimesheetReconciliationError as exc:
         draft = save_activity_draft(date_str, normalized, collection, output_dir, str(exc), entries)
         print(f"\n RECONCILIATION BLOCKED: {exc}", file=sys.stderr)
         print(f" Activity/proposed-entry draft: {draft}")
         print(" Final timesheets, collection manifest, AI input, and token records were not written.")
         return 2
-    if args.export_ai_input:
-        ai_path = Path(args.export_ai_input)
-        if demo:
-            ai_path = ai_path.parent / "demo" / ai_path.name
-        ai_path.parent.mkdir(parents=True, exist_ok=True)
-        ai_path.write_text(ai_payload_json, encoding="utf-8")
-        print(f"   -> AI payload written to {ai_path}")
-    output_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = output_dir / f"{date_str}.collection.json"
-    info = save_result["dates"][date_str]
-    manifest_path.write_text(json.dumps({"date": date_str, **collection,
-        "calendar_context_count": len(normalized["calendar_context"]),
-        "calendar_context_file": Path(info["calendar_context_path"]).name if "calendar_context_path" in info else None,
-        "unassigned_activity_count": len(unassigned_activity),
-        "activity_review_file": Path(info["activity_review_path"]).name if "activity_review_path" in info else None,
-        "review": {"status": "required" if unassigned_activity or any(e.get("calendar_overlap") for e in entries) else "none"}
-    }, indent=2), encoding="utf-8")
-
     # Step 9: Token usage tracking
-    print(f">> [6/6] Checking token tracking for {date_str} ({selected['timezone_name']})...")
-    from collect_token_usage import update_csv
-    if not demo:
-        update_csv(Path("data/token-usage.csv"), [])
+    print(f">> [6/6] Checking token tracking for {date_str} ({normalized['timezone']})...")
+    print(" Token usage unavailable: no explicit run usage supplied; token records preserved.")
 
     print("\n DEMO completed — explicitly selected fixtures; output isolated under demo/."
           if demo else "\n Pipeline run successfully completed!")

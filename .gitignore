@@ -33,3 +33,6 @@ data/audit/
 data/timesheets/demo/
 data/timesheets/drafts/
 data/raw/demo/
+
+# Pending multi-directory transaction reservation (local only)
+.timesheet-pending.json

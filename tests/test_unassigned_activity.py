@@ -142,8 +142,7 @@ class TestTimestampAssignment(unittest.TestCase):
     def test_ai_envelope_excludes_unassigned_evidence_from_block_summaries(self):
         blocks, review = assignment(model([meeting()], [commit()], [pr()]))
         payload = prepare_activity_input(blocks, review)
-        self.assertEqual(payload['blocks'][0]['commit_messages'], [])
-        self.assertEqual(payload['blocks'][0]['prs'], [])
+        self.assertEqual(payload['blocks'], [])
         self.assertEqual(len(payload['unassigned_activity']), 2)
         self.assertEqual(payload['review']['status'], 'required')
         text = json.dumps(payload)

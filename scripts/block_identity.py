@@ -19,6 +19,8 @@ def get_block_id(date, start, end):
     if (not isinstance(start, str) or not re.fullmatch(clock, start)
             or not isinstance(end, str) or not (re.fullmatch(clock, end) or end == "24:00")):
         raise BlockIdentityError("Block identity requires HH:MM boundaries")
+    if end <= start:
+        raise BlockIdentityError("Block interval must end after its start")
     return f"{date}_{start}_{end}"
 
 
@@ -31,6 +33,13 @@ def index_blocks(blocks):
         if not isinstance(block, dict):
             raise BlockIdentityError("Each candidate block must be an object")
         key = get_block_id(block.get("date"), block.get("start_time"), block.get("end_time"))
+        for field in ("commits", "prs", "calendar_events", "calendar_titles"):
+            values = block.get(field, [])
+            if not isinstance(values, list) or any(not isinstance(v, str if field == "calendar_titles" else dict) for v in values):
+                raise BlockIdentityError("Candidate source fields must contain correctly typed arrays")
+        if "duration_minutes" in block:
+            from interval_validation import validate_interval
+            validate_interval(block["date"], block["start_time"], block["end_time"], block["duration_minutes"], block.get("interval"))
         if "block_id" in block and block["block_id"] != key:
             raise BlockIdentityError("Candidate block_id conflicts with its date or interval")
         if key in indexed:

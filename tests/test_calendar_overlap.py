@@ -111,19 +111,19 @@ class TestCalendarOverlap(unittest.TestCase):
         self.assertEqual([e for b in blocks for p in b['prs'] for e in p['events']], pr['events'])
 
     def test_overlap_metadata_reaches_ai_and_final_entry(self):
-        blocks = build_time_blocks(model(meetings()))
+        blocks = build_time_blocks(model(meetings(), [commit('09:45')]))
         payload = prepare_all_blocks(blocks)
-        self.assertEqual(payload[1]['calendar_overlap'], True)
-        self.assertEqual(payload[1]['attendance'], 'unconfirmed')
-        self.assertNotIn('calendar_events', payload[1])
+        self.assertEqual(payload[0]['calendar_overlap'], True)
+        self.assertEqual(payload[0]['attendance'], 'unconfirmed')
+        self.assertNotIn('calendar_events', payload[0])
         self.assertNotIn('review', payload[0])
         row = build_entries(blocks)[1]
         self.assertEqual(row['review'], {'status': 'required', 'reasons': ['calendar_overlap'], 'attendance': 'unconfirmed'})
         self.assertIn('attendance confirmation required', row['entry']['description'])
 
     def test_ai_summary_cannot_remove_overlap_notice_or_review_metadata(self):
-        blocks = build_time_blocks(model(meetings()))
-        key = prepare_all_blocks(blocks)[1]['block_id']
+        blocks = build_time_blocks(model(meetings(), [commit('09:45')]))
+        key = prepare_all_blocks(blocks)[0]['block_id']
         row = build_entries(blocks, [{'block_id': key, 'description': 'Discuss payment validation'}])[1]
         self.assertEqual(row['summary_source'], 'ai')
         self.assertTrue(row['calendar_overlap'])

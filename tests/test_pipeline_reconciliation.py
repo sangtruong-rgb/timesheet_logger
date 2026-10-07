@@ -20,6 +20,8 @@ class TestPipelineReconciliation(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.directory = Path(self.temp.name)
+        token = self.directory / "data/token-usage.csv"
+        token.parent.mkdir(); token.write_text("PROTECTED TOKEN RECORDS")
         self.output = self.directory / "timesheets"
         self.output.mkdir()
         self.json = self.output / f"{DATE}.json"
