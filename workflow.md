@@ -64,7 +64,13 @@ extracted; activities are not automatically clustered by ticket. No automatic AI
 cache exists. Validated supplied judgments may be reused explicitly with the same
 frozen snapshot; a changed snapshot needs new judgment/review.
 
-The collector requires a marked run manifest, not an implicit ~/.claude scan.
+For Codex, [the optional runner and usage adapter](docs/codex-usage.md) measure one
+fresh summary invocation from CLI events. Cached input is already included in
+provider input and is partitioned into the CSV cache column; it is not added twice.
+The original provider counts and measured scope remain in attribution notes. This
+is separate from full Claude skill-run acceptance. The pipeline never invokes AI.
+
+The Claude collector requires a marked run manifest, not an implicit ~/.claude scan.
 Message IDs isolate relevant usage if other work occurred in the marked window.
 Latest complete usage snapshot per identified message replaces repeats;
 unidentifiable legacy records only deduplicate exact snapshots. All four counts

@@ -60,10 +60,12 @@ def protected_input_paths(args):
     manifest = getattr(args, "usage_run_manifest", None)
     if manifest:
         try:
-            value = json.loads(Path(manifest).read_text(encoding="utf-8")).get("session_file")
-            if isinstance(value, str) and value:
-                path = Path(value).expanduser()
-                paths.append(path if path.is_absolute() else Path(manifest).resolve().parent / path)
+            metadata = json.loads(Path(manifest).read_text(encoding="utf-8"))
+            for key in ("session_file", "snapshot_file", "ai_output_file"):
+                value = metadata.get(key)
+                if isinstance(value, str) and value:
+                    path = Path(value).expanduser()
+                    paths.append(path if path.is_absolute() else Path(manifest).resolve().parent / path)
         except (OSError, ValueError, AttributeError):
             pass  # Token attribution validates malformed manifests separately.
     return paths
@@ -151,7 +153,7 @@ def _run():
     parser.add_argument("--export-ai-input", type=str, default=None, help="Path to write the minimal AI payload")
     parser.add_argument("--output-dir", type=str, default=str(Path(__file__).resolve().parent.parent / "data/timesheets"), help="Timesheet output directory")
 
-    parser.add_argument("--usage-run-manifest", help="Explicit run/session/time-window evidence for Claude usage")
+    parser.add_argument("--usage-run-manifest", help="Explicit Claude transcript or Codex invocation evidence")
     parser.add_argument("--token-csv-path", help="Isolated token output; default from profile/environment/repo root")
     parser.add_argument("--claude-dir", help="Exact session lookup root (no global usage aggregation)")
     args = parser.parse_args()
@@ -309,8 +311,12 @@ def assemble_activity(args, date_str, normalized, collection, output_dir, *, fro
             from token_settings import token_settings
             from activity_settings import resolve_timezone
             paths = token_settings(args.config, args.claude_dir, args.token_csv_path)
+            usage_manifest = json.loads(Path(args.usage_run_manifest).read_text(encoding="utf-8"))
+            if isinstance(usage_manifest, dict) and usage_manifest.get("provider") == "codex" and (not frozen or not args.ai_output):
+                raise ValueError("Codex attribution requires assemble with a frozen snapshot and explicit AI output")
             record = collect_run(args.usage_run_manifest, resolve_timezone(normalized["timezone"], allow_legacy_offset=True),
-                expected_target=date_str, expected_run=frozen["run_id"] if frozen else None, claude_dir=paths["claude_dir"])
+                expected_target=date_str, expected_run=frozen["run_id"] if frozen else None,
+                claude_dir=paths["claude_dir"], expected_ai_output=args.ai_output)
             token_records, token_csv = [record], paths["csv_path"]
             collection["token_usage"] = {"status": "attributed", "execution_date": record["date"],
                 "run_identity": record["session_id"], **{key: record[key] for key in ("input_tokens", "output_tokens", "cache_tokens", "total_tokens")},
