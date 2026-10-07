@@ -54,6 +54,12 @@ def calculate_minutes(start_dt: datetime.datetime, end_dt: datetime.datetime) ->
 
 def build_time_blocks(normalized_data: Dict[str, Any], *, unassigned_activity=None) -> List[Dict[str, Any]]:
     """Build timed proposals; callers persisting evidence must collect unassigned_activity."""
+    if unassigned_activity is not None:
+        from copy import deepcopy
+        from activity_review import validate_unassigned_activity
+        retained = normalized_data.get("unassigned_activity", [])
+        validate_unassigned_activity(retained)
+        unassigned_activity.extend(deepcopy(retained))
     try:
         tz = (resolve_timezone(normalized_data["timezone"], allow_legacy_offset=True)
               if "timezone" in normalized_data else timezone_settings()[1])

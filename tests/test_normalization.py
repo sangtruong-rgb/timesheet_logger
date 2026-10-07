@@ -32,6 +32,7 @@ class TestNormalization(unittest.TestCase):
                 "repository": "repo-a",
                 "title": "Fix validation bug",
                 "status": "opened",
+                "timestamp": "2026-10-06T10:00:00+07:00",
                 "url": "https://github.com/org/repo-a/pull/42",
                 "user_avatar": "strip me"
             }

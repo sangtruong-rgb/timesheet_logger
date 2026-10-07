@@ -48,11 +48,14 @@ def run_source_collector(command, source, mode):
 
 
 def save_activity_draft(date_str, normalized, collection, output_dir, storage_reason=None, proposed_entries=None,
-                        ai_reason=None, ai_payload=None):
+                        ai_reason=None, ai_payload=None, normalization_issues=None):
     """A blocked run records evidence, never replaces a final timesheet."""
     draft_dir = Path(output_dir) / "drafts"
     draft_dir.mkdir(parents=True, exist_ok=True)
     payload = {"date": date_str, "collection": collection, "activity": normalized}
+    if normalization_issues:
+        payload["activity_format"] = "raw"
+        payload["normalization"] = {"status": "blocked", "issues": normalization_issues}
     if storage_reason:
         payload["reconciliation"] = {"status": "blocked", "reason": storage_reason}
         payload["proposed_entries"] = proposed_entries
@@ -61,10 +64,15 @@ def save_activity_draft(date_str, normalized, collection, output_dir, storage_re
         payload["ai_input"] = ai_payload
     json_path = draft_dir / f"{date_str}.json"
     json_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    banner = ("> REVIEW REQUIRED: daily reconciliation was blocked. Final files were preserved."
+    banner = ("> REVIEW REQUIRED: source normalization was blocked. Final files were preserved."
+              if normalization_issues else "> REVIEW REQUIRED: daily reconciliation was blocked. Final files were preserved."
               if storage_reason else "> REVIEW REQUIRED: AI/block identity validation failed. Final files were preserved."
               if ai_reason else "> INCOMPLETE: a source is unavailable or failed. This is not a completed timesheet.")
     lines = [f"# Activity draft — {date_str}", "", banner, ""]
+    if normalization_issues:
+        lines.extend([json.dumps(normalization_issues, indent=2), ""])
+        if collection["status"] == "incomplete":
+            lines.extend(["> INCOMPLETE: a source is unavailable or failed.", ""])
     if storage_reason:
         lines.extend([storage_reason, ""])
     if ai_reason:
@@ -130,8 +138,6 @@ def run():
 
     # Step 4: Normalize
     print(">> [4/6] Normalizing data and eliminating redundancy...")
-    from normalize_activity import normalize_all
-    normalized = normalize_all(date_str, commits_data, pr_result["items"], cal_result["items"], selected["timezone_name"])
     source_results = {"git": git_result, "pull_requests": pr_result, "calendar": cal_result}
     incomplete = any(result["status"] != "success" for result in source_results.values())
     demo = any(result["mode"] == "fixture" for result in source_results.values())
@@ -144,13 +150,25 @@ def run():
     }
     for name, source in collection["sources"].items():
         print(f"   {name}: {source['status']} ({source['mode']}, {source['count']} items)")
+    output_dir = Path(args.output_dir) / "demo" if demo and not incomplete else Path(args.output_dir)
+    from normalize_activity import normalize_all, ActivityNormalizationError
+    try:
+        normalized = normalize_all(date_str, commits_data, pr_result["items"], cal_result["items"], selected["timezone_name"])
+    except ActivityNormalizationError as exc:
+        raw = {"date": date_str, "timezone": selected["timezone_name"], "commits": commits_data,
+               "pull_requests": pr_result["items"], "calendar": cal_result["items"]}
+        draft = save_activity_draft(date_str, raw, collection, output_dir, normalization_issues=exc.issues)
+        print(f"\n NORMALIZATION BLOCKED: {exc}", file=sys.stderr)
+        if incomplete:
+            print(" INCOMPLETE: a source is unavailable or failed.")
+        print(f" Raw evidence draft: {draft}")
+        print(" Final timesheets, collection manifest, AI input, and token records were not written.")
+        return 2
     if incomplete:
         draft = save_activity_draft(date_str, normalized, collection, args.output_dir)
         print(f"\n INCOMPLETE: review source setup/errors. Activity draft: {draft}")
         print(" Final timesheets, AI input, and token records were not written.")
         return 2
-
-    output_dir = Path(args.output_dir) / "demo" if demo else Path(args.output_dir)
 
     # Step 5: Build time blocks
     from build_time_blocks import build_time_blocks

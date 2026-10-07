@@ -60,7 +60,7 @@ class TestGitActivity(unittest.TestCase):
                 "hash": "commit1",  # duplicate
                 "timestamp": "2026-10-06T11:00:00+07:00",
                 "author": "Sang",
-                "message": "duplicate commit"
+                "message": "second commit"
             },
             {
                 "hash": "commit0",

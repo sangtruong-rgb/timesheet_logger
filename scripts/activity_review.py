@@ -13,12 +13,15 @@ def validate_unassigned_activity(records):
     if not isinstance(records, list):
         raise ValueError("Unassigned activity must be an array")
     for record in records:
-        if (not isinstance(record, dict) or record.get("source") not in ("git", "github")
+        if (not isinstance(record, dict) or record.get("source") not in ("git", "github", "google_calendar")
                 or not isinstance(record.get("reason"), str) or record["reason"] not in REASONS
                 or not isinstance(record.get("activity"), dict)
                 or (record["source"] == "git" and not isinstance(record["activity"].get("hash"), str))
                 or (record["source"] == "github" and record["activity"].get("id") is None)):
             raise ValueError("Unassigned activity requires source, reason and original evidence")
+        if record["source"] == "google_calendar" and any(not isinstance(record["activity"].get(field), str)
+                                                           for field in ("title", "start", "end")):
+            raise ValueError("Calendar review evidence requires title, start and end")
 
 
 def unpack_activity_snapshot(data, field):
@@ -40,6 +43,7 @@ def minimal_review(records):
         activity = record["activity"]
         result.append({"source": record["source"], "reason": record["reason"],
                        **({"message": activity.get("message", "")} if record["source"] == "git" else
+                          {"title": activity.get("title", "")} if record["source"] == "google_calendar" else
                           {"id": activity["id"], "title": activity.get("title", ""),
                            "action": activity.get("status", "")})})
     return result
