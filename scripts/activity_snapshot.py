@@ -6,6 +6,7 @@ import uuid
 from atomic_storage import directory_lock, write_bundle, StorageError
 from block_identity import BlockIdentityError, index_blocks
 from activity_review import validate_unassigned_activity
+from output_paths import validate_auxiliary_output, OutputPathError
 
 
 class SnapshotError(BlockIdentityError):
@@ -49,17 +50,21 @@ def save_snapshot(path, normalized, collection, blocks, unassigned, ai_input, ai
     path = Path(path)
     body = {"schema_version": 1, "normalized": normalized, "collection": collection,
             "blocks": blocks, "unassigned_activity": unassigned, "ai_input": ai_input}
-    if ai_export and Path(ai_export).resolve() == path.resolve():
-        raise SnapshotError("AI export cannot overwrite its activity snapshot")
     extra = [ai_export] if ai_export else []
     try:
+        if ai_export:
+            validate_auxiliary_output(ai_export, protected_paths=[path])
         return _save_snapshot(path, body, extra, ai_input, ai_export)
+    except OutputPathError as exc:
+        raise SnapshotError(str(exc)) from exc
     except (StorageError, OSError) as exc:
         raise SnapshotError("Snapshot output could not be saved; prior output was preserved") from exc
 
 
 def _save_snapshot(path, body, extra, ai_input, ai_export):
     with directory_lock(path.parent, extra_paths=extra):
+        if ai_export:
+            validate_auxiliary_output(ai_export, protected_paths=[path])
         if path.exists():
             existing = read_snapshot(path)
             if {k: v for k, v in existing.items() if k not in ("run_id", "fingerprint")} != body:
