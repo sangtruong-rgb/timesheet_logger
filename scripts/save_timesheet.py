@@ -61,7 +61,7 @@ def upsert_entries(
     return sorted_items, inserted, updated
 
 
-def render_markdown(date_str: str, items: List[Dict[str, Any]], collection_status=None) -> str:
+def render_markdown(date_str: str, items: List[Dict[str, Any]], collection_status=None, calendar_context=None) -> str:
     lines = [
         f"# Timesheet — {date_str}",
         "",
@@ -130,6 +130,13 @@ def render_markdown(date_str: str, items: List[Dict[str, Any]], collection_statu
     if has_overlap:
         lines.append(f"Calendar overlap awaiting attendance confirmation: {overlap_minutes} mins (included in scheduled total).")
     lines.append("")
+    if calendar_context:
+        lines.extend(["## Calendar context (not counted as work time)", "",
+                      "All-day events provide context; they do not confirm work duration or a day off.", ""])
+        for event in calendar_context:
+            title = event["title"].replace("\n", " ")
+            lines.append(f"- {title} — all-day, {event['start']} to {event['end']} (end date exclusive).")
+        lines.append("")
     return "\n".join(lines)
 
 
@@ -237,7 +244,23 @@ def reconcile_daily_entries(existing, incoming, target_date, collection_status):
     return merged, counts
 
 
-def save_timesheet(entries, output_dir="data/timesheets", *, target_date, collection_status):
+def validate_calendar_context(context, target_date):
+    """All-day context has date extents, never daily entry intervals or durations."""
+    if not isinstance(context, list):
+        raise TimesheetReconciliationError("Calendar context must be an array")
+    for event in context:
+        try:
+            if not isinstance(event, dict) or event.get("all_day") is not True or not isinstance(event.get("title"), str):
+                raise ValueError("Invalid context")
+            start, end = (datetime.date.fromisoformat(event[key]) for key in ("start", "end"))
+            if (start.isoformat() != event["start"] or end.isoformat() != event["end"]
+                    or not start <= datetime.date.fromisoformat(target_date) < end):
+                raise ValueError("Context outside target day")
+        except (KeyError, TypeError, ValueError) as exc:
+            raise TimesheetReconciliationError("All-day context requires valid dates overlapping the target day") from exc
+
+
+def save_timesheet(entries, output_dir="data/timesheets", *, target_date, collection_status, calendar_context=None):
     """Persist exactly one successful daily snapshot; [] explicitly clears generated rows."""
     try:
         if datetime.date.fromisoformat(target_date).isoformat() != target_date:
@@ -256,15 +279,38 @@ def save_timesheet(entries, output_dir="data/timesheets", *, target_date, collec
         except (ValueError, OSError) as exc:
             raise TimesheetReconciliationError("Cannot read existing daily JSON; original files were preserved") from exc
     merged, counts = reconcile_daily_entries(existing, entries, target_date, collection_status)
+    context_file = dir_path / f"{target_date}.calendar-context.json"
+    old_context = None
+    if context_file.exists():
+        try:
+            old_context = json.loads(context_file.read_text(encoding="utf-8"))
+            if (not isinstance(old_context, dict) or old_context.get("date") != target_date
+                    or old_context.get("collection_status") not in ("complete", "demo")):
+                raise ValueError("Invalid context store")
+            validate_calendar_context(old_context["calendar_context"], target_date)
+        except (KeyError, ValueError, OSError) as exc:
+            raise TimesheetReconciliationError("Cannot read existing Calendar context; original files were preserved") from exc
+    # Standalone callers omitting context preserve it; a supplied [] clears old context.
+    context = calendar_context
+    if context is None:
+        context = old_context["calendar_context"] if old_context else []
+    validate_calendar_context(context, target_date)
+    context_record = {"date": target_date, "collection_status": collection_status, "calendar_context": context}
+    write_context = bool(context) or context_file.exists()
+    context_changed = write_context and context_record != old_context
     # Validate/render before any final output mutation. Exact reruns keep bytes unchanged.
     json_content = json.dumps(merged, indent=2)
-    md_content = render_markdown(target_date, merged, collection_status)
+    context_content = json.dumps(context_record, indent=2)
+    md_content = render_markdown(target_date, merged, collection_status, context)
     dir_path.mkdir(parents=True, exist_ok=True)
     if merged != existing or not json_file.exists():
         json_file.write_text(json_content, encoding="utf-8")
-    if merged != existing or not md_file.exists():
+    if merged != existing or context_changed or not md_file.exists():
         md_file.write_text(md_content, encoding="utf-8")
-    return {"dates": {target_date: {**counts, "json_path": str(json_file), "md_path": str(md_file)}}}
+    if context_changed:
+        context_file.write_text(context_content, encoding="utf-8")
+    return {"dates": {target_date: {**counts, "json_path": str(json_file), "md_path": str(md_file),
+                                   **({"calendar_context_path": str(context_file)} if write_context else {})}}}
 
 
 def main():
@@ -272,6 +318,7 @@ def main():
     parser.add_argument("--entries-file", "-i", type=str, required=True, help="Path to entries JSON file")
     parser.add_argument("--output-dir", "-d", type=str, default="data/timesheets", help="Directory for timesheet stores")
     parser.add_argument("--date", required=True, help="Target date YYYY-MM-DD, required even for an empty snapshot")
+    parser.add_argument("--calendar-context-file", help="Optional JSON array of all-day context; [] explicitly clears it")
     parser.add_argument("--collection-status", required=True, choices=("complete", "demo"),
                         help="Assert successful full-day collection; demo output is isolated under demo/")
 
@@ -284,8 +331,10 @@ def main():
 
     try:
         entries = json.loads(in_path.read_text(encoding="utf-8"))
+        context = json.loads(Path(args.calendar_context_file).read_text(encoding="utf-8")) if args.calendar_context_file else None
         output_dir = Path(args.output_dir) / "demo" if args.collection_status == "demo" else Path(args.output_dir)
-        res = save_timesheet(entries, str(output_dir), target_date=args.date, collection_status=args.collection_status)
+        res = save_timesheet(entries, str(output_dir), target_date=args.date, collection_status=args.collection_status,
+                             calendar_context=context)
     except (ValueError, OSError) as exc:
         print(f"Save blocked: {exc}", file=sys.stderr)
         return 2
