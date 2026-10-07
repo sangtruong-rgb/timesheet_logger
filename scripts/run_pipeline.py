@@ -154,14 +154,15 @@ def run():
     from build_time_blocks import build_time_blocks
 
     # Step 6: Prepare minimal AI input
-    from prepare_ai_input import prepare_all_blocks
+    from prepare_ai_input import prepare_activity_input
     from block_identity import BlockIdentityError
     # Step 7: Build entries
     from build_timesheet import build_entries, load_ai_judgments
     ai_payload = None
+    unassigned_activity = []
     try:
-        blocks = build_time_blocks(normalized)
-        ai_payload = prepare_all_blocks(blocks)
+        blocks = build_time_blocks(normalized, unassigned_activity=unassigned_activity)
+        ai_payload = prepare_activity_input(blocks, unassigned_activity)
         entries = build_entries(blocks, load_ai_judgments(args.ai_output))
     except BlockIdentityError as exc:
         draft = save_activity_draft(date_str, normalized, collection, output_dir,
@@ -179,7 +180,8 @@ def run():
     from save_timesheet import save_timesheet, TimesheetReconciliationError
     try:
         save_result = save_timesheet(entries, str(output_dir), target_date=date_str,
-                                     collection_status=collection["status"], calendar_context=normalized["calendar_context"])
+                                     collection_status=collection["status"], calendar_context=normalized["calendar_context"],
+                                     unassigned_activity=unassigned_activity)
     except TimesheetReconciliationError as exc:
         draft = save_activity_draft(date_str, normalized, collection, output_dir, str(exc), entries)
         print(f"\n RECONCILIATION BLOCKED: {exc}", file=sys.stderr)
@@ -198,7 +200,10 @@ def run():
     info = save_result["dates"][date_str]
     manifest_path.write_text(json.dumps({"date": date_str, **collection,
         "calendar_context_count": len(normalized["calendar_context"]),
-        "calendar_context_file": Path(info["calendar_context_path"]).name if "calendar_context_path" in info else None
+        "calendar_context_file": Path(info["calendar_context_path"]).name if "calendar_context_path" in info else None,
+        "unassigned_activity_count": len(unassigned_activity),
+        "activity_review_file": Path(info["activity_review_path"]).name if "activity_review_path" in info else None,
+        "review": {"status": "required" if unassigned_activity or any(e.get("calendar_overlap") for e in entries) else "none"}
     }, indent=2), encoding="utf-8")
 
     # Step 9: Token usage tracking
@@ -211,6 +216,8 @@ def run():
           if demo else "\n Pipeline run successfully completed!")
     print(f" Collection manifest: {manifest_path}")
     overlap_count = sum(bool(entry.get("calendar_overlap")) for entry in entries)
+    if unassigned_activity:
+        print(f" REVIEW REQUIRED: {len(unassigned_activity)} activity event(s) could not be assigned by timestamp; no duration inferred.")
     if overlap_count:
         print(f" REVIEW REQUIRED: {overlap_count} Calendar overlap interval(s) need attendance confirmation. Output is a proposal.")
     if "dates" in save_result and date_str in save_result["dates"]:
@@ -219,6 +226,8 @@ def run():
         print(f" Timesheet Markdown: {info['md_path']}")
         if "calendar_context_path" in info:
             print(f" Calendar context (not counted as work time): {info['calendar_context_path']}")
+        if "activity_review_path" in info:
+            print(f" Unassigned activity audit: {info['activity_review_path']}")
         print(f" Total Entries: {info['total_entries']} (Inserted: {info['inserted']}, Updated: {info['updated']}, "
               f"Removed: {info['removed']}, Manual preserved: {info['preserved_manual']}, Overridden: {info['overridden']})")
     return 0

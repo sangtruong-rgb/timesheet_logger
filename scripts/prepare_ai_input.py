@@ -20,6 +20,7 @@ import sys
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from block_identity import get_block_id, index_blocks
+from activity_review import minimal_review, unpack_activity_snapshot
 
 TICKET_PATTERN = re.compile(r'\b([A-Z]{2,10}-[0-9]+)\b')
 
@@ -72,6 +73,13 @@ def prepare_all_blocks(blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return payloads
 
 
+def prepare_activity_input(blocks, unassigned_activity):
+    return {"blocks": prepare_all_blocks(blocks),
+            "unassigned_activity": minimal_review(unassigned_activity),
+            "review": {"status": "required" if unassigned_activity else "none",
+                       "instruction": "Summarize only blocks. Unassigned activity needs human review; do not attach it to a block or infer work duration."}}
+
+
 def main():
     parser = argparse.ArgumentParser(description="Prepare minimal payload for AI topic synthesis.")
     parser.add_argument("--blocks-file", "-i", type=str, required=True, help="Path to candidate blocks JSON file")
@@ -83,8 +91,13 @@ def main():
         print(f"Error: {args.blocks_file} not found.", file=sys.stderr)
         sys.exit(1)
 
-    blocks = json.loads(b_path.read_text(encoding="utf-8"))
-    payloads = prepare_all_blocks(blocks)
+    try:
+        blocks, unassigned = unpack_activity_snapshot(json.loads(b_path.read_text(encoding="utf-8")), "blocks")
+        payloads = (prepare_activity_input(blocks, unassigned)
+                    if unassigned is not None else prepare_all_blocks(blocks))
+    except (ValueError, OSError) as exc:
+        print(f"Activity/AI-input validation failed: {exc}", file=sys.stderr)
+        return 2
 
     output_json = json.dumps(payloads, indent=2)
     if args.output and args.output != "-":
@@ -93,7 +106,8 @@ def main():
         out_p.write_text(output_json, encoding="utf-8")
     else:
         print(output_json)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

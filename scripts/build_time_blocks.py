@@ -18,7 +18,9 @@ Rules:
    - If activity exists only in morning (< 12:30): block is 09:00–12:30.
    - If activity exists only in afternoon (>= 12:30): block is 13:30–17:30.
    - If activity spans both: split into 09:00–12:00 and 13:30–17:30.
+   - Retain only windows with aware activity timestamps inside them.
 3. Associate commits and PRs deterministically with time blocks based on timestamps.
+   Preserve unmatched activity separately for review, never in an arbitrary block.
 4. Calculate duration in minutes/hours deterministically in code.
 """
 
@@ -50,7 +52,8 @@ def calculate_minutes(start_dt: datetime.datetime, end_dt: datetime.datetime) ->
     return max(0, int(delta.total_seconds() // 60))
 
 
-def build_time_blocks(normalized_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+def build_time_blocks(normalized_data: Dict[str, Any], *, unassigned_activity=None) -> List[Dict[str, Any]]:
+    """Build timed proposals; callers persisting evidence must collect unassigned_activity."""
     target_date_str = normalized_data.get("date", "")
     target_date = datetime.date.fromisoformat(target_date_str) if target_date_str else datetime.date.today()
 
@@ -208,16 +211,16 @@ def build_time_blocks(normalized_data: Dict[str, Any]) -> List[Dict[str, Any]]:
         all_times = []
         for c in commits:
             dt = parse_dt(c.get("timestamp"))
-            if dt:
+            if dt and dt.tzinfo is not None and daily_start <= dt < daily_end:
                 all_times.append(dt)
         for p in prs:
             dt = parse_dt(p.get("timestamp"))
-            if dt:
+            if dt and dt.tzinfo is not None and daily_start <= dt < daily_end:
                 all_times.append(dt)
 
         noon = datetime.datetime.combine(target_date, datetime.time(12, 30), tzinfo=tz)
 
-        has_morning = any(t < noon for t in all_times) if all_times else True
+        has_morning = any(t < noon for t in all_times)
         has_afternoon = any(t >= noon for t in all_times) if all_times else False
 
         if has_morning and has_afternoon:
@@ -255,7 +258,7 @@ def build_time_blocks(normalized_data: Dict[str, Any]) -> List[Dict[str, Any]]:
                 "commits": [],
                 "prs": []
             })
-        else:
+        elif has_morning:
             s = datetime.datetime.combine(target_date, datetime.time(9, 0), tzinfo=tz)
             e = datetime.datetime.combine(target_date, datetime.time(12, 30), tzinfo=tz)
             blocks.append({
@@ -277,8 +280,28 @@ def build_time_blocks(normalized_data: Dict[str, Any]) -> List[Dict[str, Any]]:
             end = datetime.datetime.combine(target_date, datetime.time.fromisoformat(block["end_time"]), tzinfo=tz)
             block_bounds.append((start, end))
 
+        # A timestamp outside the candidate window must not create estimated hours.
+        supported = [(block, bounds) for block, bounds in zip(blocks, block_bounds)
+                     if has_activity(*bounds)]
+        blocks = [block for block, _ in supported]
+        block_bounds = [bounds for _, bounds in supported]
+
+    def retain_unassigned(source, activity, timestamp):
+        if unassigned_activity is None:
+            return
+        if not activity.get("timestamp"):
+            reason = "missing_timestamp"
+        elif timestamp is None:
+            reason = "invalid_timestamp"
+        elif timestamp.tzinfo is None:
+            reason = "naive_timestamp"
+        elif not daily_start <= timestamp < daily_end:
+            reason = "outside_target_day"
+        else:
+            reason = "outside_blocks"
+        unassigned_activity.append({"source": source, "reason": reason, "activity": dict(activity)})
+
     # Use the same aware intervals for qualifying gap evidence and direct assignment.
-    unassigned_commits = []
     for c in commits:
         c_dt = parse_dt(c.get("timestamp"))
         assigned = False
@@ -289,18 +312,9 @@ def build_time_blocks(normalized_data: Dict[str, Any]) -> List[Dict[str, Any]]:
                     assigned = True
                     break
         if not assigned:
-            unassigned_commits.append(c)
-
-    # Existing unmatched-activity fallback remains pending F08 review.
-    if unassigned_commits and blocks:
-        # Find development block or first available block
-        dev_blocks = [b for b in blocks if b.get("block_type") == "development" or "Focus" in "".join(b["calendar_titles"])]
-        target_b = dev_blocks[0] if dev_blocks else blocks[-1]
-        for c in unassigned_commits:
-            target_b["commits"].append(c)
+            retain_unassigned("git", c, c_dt)
 
     # Associate PRs with blocks
-    unassigned_prs = []
     for p in prs:
         p_dt = parse_dt(p.get("timestamp"))
         assigned = False
@@ -311,14 +325,7 @@ def build_time_blocks(normalized_data: Dict[str, Any]) -> List[Dict[str, Any]]:
                     assigned = True
                     break
         if not assigned:
-            unassigned_prs.append(p)
-
-    if unassigned_prs and blocks:
-        # Associate with the block that has commits, or first development block
-        blocks_with_commits = [b for b in blocks if b["commits"]]
-        target_b = blocks_with_commits[0] if blocks_with_commits else blocks[0]
-        for p in unassigned_prs:
-            target_b["prs"].append(p)
+            retain_unassigned("github", p, p_dt)
 
     from get_pr_activity import deduplicate_prs
     for block in blocks:
@@ -339,9 +346,9 @@ def main():
         sys.exit(1)
 
     data = json.loads(norm_path.read_text(encoding="utf-8"))
-    blocks = build_time_blocks(data)
-
-    output_json = json.dumps(blocks, indent=2)
+    unassigned = []
+    blocks = build_time_blocks(data, unassigned_activity=unassigned)
+    output_json = json.dumps({"blocks": blocks, "unassigned_activity": unassigned}, indent=2)
     if args.output and args.output != "-":
         out_p = Path(args.output)
         out_p.parent.mkdir(parents=True, exist_ok=True)

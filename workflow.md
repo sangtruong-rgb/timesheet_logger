@@ -21,6 +21,7 @@ This document defines the complete daily execution sequence for the **Personal P
 | **4** | `[Script]` | **Collect Calendar Events** | Use an authorized Google token or explicit fixture; both preserve all_day dates and select events overlapping the requested local day, including previous-night events. Missing setup/request failures never become sample data. | Deterministic interval filtering, event typing and source status extraction. |
 | **5** | `[Script]` | **Normalize & Deduplicate** | Keep qualified repo/PR references, distinct action events and commit identity provenance. Separate all-day Calendar context from timed events; never infer work duration or a day off from context. | Deterministic projection and set/dict operations. |
 | **6** | `[Script]` | **Construct Time Blocks** | Clip timed events to the selected local day, using 24:00 for its midnight end and elapsed UTC minutes. Partition at event boundaries, retaining original active sources; overlap requires attendance confirmation. Scheduled lunch meetings stay. Development gaps subtract 12:00–13:30, then require 30 minutes and activity evidence per interval. All-day context adds no time; empty-Calendar workday fallback remains D02. | Deterministic daily clipping, interval partitioning and evidence checks. |
+
 | **7** | `[Script]` | **Associate Activities** | Match commit and PR timestamps against time block intervals (`start <= timestamp < end`). | Deterministic timestamp interval comparison. |
 | **8** | `[Script]` | **Pre-AI Ticket Grouping** | Scan commit messages and PR titles for ticket patterns (e.g., `PAY-123`). If detected, pre-cluster activities sharing the same ticket ID. | Deterministic regex matching (reduces AI work). |
 | **9** | `[Script]` | **Prepare Minimal AI Payload** | Strip hashes, raw timestamps, author names, URLs, and file paths. Produce compact JSON with a stable date/start/end block_id, time_basis, block times, actual calendar titles, messages, and PR titles. Reject duplicate candidate identities. | Deterministic data projection and block identity. |
@@ -29,6 +30,21 @@ This document defines the complete daily execution sequence for the **Personal P
 | **12** | `[Script]` | **Match Summaries, Format Entries & Append PRs** | Match AI output by exact block_id, never array position. Allow partial output with each unmatched block's own fallback; reject unknown/duplicate/inconsistent identities before saving. Retain block_id and ai/fallback provenance alongside source evidence. Append the block's PR suffix. | Deterministic keyed matching, validation, and formatting. |
 | **13** | `[Script]` | **Daily Reconciliation & Storage** | Reconcile the full generated daily set while preserving manual rows/overrides and refusing ownership conflicts. Save all-day context in a separate daily sidecar and Markdown context section; it contributes no duration. Context changes/deletions update on successful snapshots; validation/source failures preserve existing final/context/AI/token files. Exact reruns preserve bytes. | Deterministic daily reconciliation, context validation and successful-collection gate. |
 | **14** | `[Script]` | **Record Token Usage** | Scan Claude Code transcripts under `~/.claude/*.jsonl` or session logs. Extract input/output/cache token metrics and update `data/token-usage.csv`. | Deterministic JSONL parsing and CSV aggregation. |
+
+Activity association uses aware timestamps within the selected day's `[start,end)`
+intervals. Unmatched commits and individual PR actions are retained separately with
+reasons; no arbitrary fallback block is selected. No-Calendar candidate windows
+require timestamp evidence inside them, and remain estimated proposals. An
+unmatched-only day has zero timed entries plus review evidence. No OT/breaktime
+classification is inferred.
+
+AI exports contain `{blocks, unassigned_activity, review}`; synthesize only `blocks`
+and return the existing keyed-summary array. The compact unmatched list is for
+review, never a source for assigning an unrelated block. Storage preserves original
+evidence in the daily activity-review sidecar, displays it outside Markdown totals,
+and links counts/status in the collection manifest. COMPLETE source status and
+required human review are separate. Successful reruns reconcile/clear review;
+failures preserve previous outputs, and explicit demo output stays isolated.
 
 ---
 
