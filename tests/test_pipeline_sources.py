@@ -34,13 +34,15 @@ class TestPipelineSources(unittest.TestCase):
         fixtures.mkdir()
         for name in ("sample_prs.json", "sample_calendar.json"):
             shutil.copyfile(ROOT / "data/fixtures" / name, fixtures / name)
+        self.config = self.cwd / "config.json"
+        self.config.write_text(json.dumps({"author": {"names": ["Test User"]}, "timezone": "Asia/Ho_Chi_Minh"}))
         self.env = dict(os.environ, TZ="Asia/Ho_Chi_Minh", PATH="/usr/bin:/bin")
         for name in ("GH_TOKEN", "GITHUB_TOKEN", "GITLAB_TOKEN", "PYTHONPATH"):
             self.env.pop(name, None)
 
     def run_pipeline(self, *extra, export=True):
         command = [sys.executable, str(ROOT / "scripts/run_pipeline.py"),
-                   "--date", DATE, "--repos", str(self.cwd / "missing-repo"),
+                   "--config", str(self.config), "--date", DATE, "--repos", str(self.cwd / "missing-repo"),
                    "--output-dir", str(self.output)]
         if export:
             command.extend(["--export-ai-input", str(self.ai_path)])
@@ -105,8 +107,10 @@ class TestPipelineSources(unittest.TestCase):
         binary = self.cwd / "bin"
         binary.mkdir()
         gh = binary / "gh"
-        gh.write_text(f"#!{sys.executable}\nimport sys\nif sys.argv[1] == 'search': print('[]')\n")
+        gh.write_text(f"#!{sys.executable}\nimport sys\nif sys.argv[1] == 'api': print('[]')\n")
         gh.chmod(0o755)
+        # Set an explicit remote slug only for this empty-live-source test.
+        self.config.write_text(json.dumps({"author": {"names": ["Test User"]}, "github": {"users": ["test-user"]}, "timezone": "Asia/Ho_Chi_Minh"}))
         self.env["PATH"] = str(binary) + os.pathsep + self.env["PATH"]
         packages = self.cwd / "packages"
         for package in ("google", "google/oauth2", "googleapiclient"):
@@ -124,7 +128,7 @@ class TestPipelineSources(unittest.TestCase):
         self.final_json.unlink()
         self.final_md.unlink()
         self.token_path.unlink()
-        response = self.run_pipeline(export=False)
+        response = self.run_pipeline("--repos", "example/empty", export=False)
         self.assertEqual(response.returncode, 0, response.stderr)
         self.assertIn("successfully completed", response.stdout)
         manifest = json.loads((self.output / f"{DATE}.collection.json").read_text())

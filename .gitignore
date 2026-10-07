@@ -16,6 +16,9 @@ venv/
 credentials.json
 token.json
 client_secret*.json
+config/user-config.json
+data/raw/live/
+data/audit/
 
 # macOS
 .DS_Store

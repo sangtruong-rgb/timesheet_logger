@@ -6,7 +6,7 @@
   "repositories": [
     "."
   ],
-  "timezone": "+07:00",
+  "timezone": "Asia/Ho_Chi_Minh",
   "workday": {
     "start": "09:00",
     "end": "18:00",

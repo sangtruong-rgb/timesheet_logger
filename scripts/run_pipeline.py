@@ -24,6 +24,7 @@ import sys
 from pathlib import Path
 
 from collection_result import collection_result, source_metadata
+from activity_settings import add_settings_arguments, settings_from_args
 
 
 def run_source_collector(command, source, mode):
@@ -66,7 +67,8 @@ def save_activity_draft(date_str, normalized, collection, output_dir):
 def run():
     parser = argparse.ArgumentParser(description="Run the end-to-end timesheet pipeline.")
     parser.add_argument("--date", type=str, default=None, help="Target date YYYY-MM-DD (default: today)")
-    parser.add_argument("--repos", nargs="+", default=["."], help="Repositories to scan for Git activity")
+    parser.add_argument("--repos", nargs="+", default=None, help="Repositories shared by Git and PR collection")
+    add_settings_arguments(parser)
     parser.add_argument("--calendar-fixture", type=str, default=None, help="Explicit Calendar demo/test fixture")
     parser.add_argument("--prs-fixture", type=str, default=None, help="Explicit PR demo/test fixture")
     parser.add_argument("--ai-output", type=str, default=None, help="Pre-computed AI topic judgments JSON")
@@ -74,26 +76,39 @@ def run():
     parser.add_argument("--output-dir", type=str, default="data/timesheets", help="Timesheet output directory")
 
     args = parser.parse_args()
-
-    date_str = args.date or datetime.datetime.now().astimezone().date().isoformat()
+    try:
+        selected = settings_from_args(args)
+        date_str = args.date or datetime.datetime.now(selected["timezone"]).date().isoformat()
+        datetime.date.fromisoformat(date_str)
+    except (ValueError, OSError, KeyError) as exc:
+        parser.error(str(exc))
     scripts_dir = Path(__file__).resolve().parent
+    common = ["--timezone", selected["timezone_name"], "--repos", *selected["repos"]]
+    if args.config:
+        common += ["--config", args.config]
+    for key, flag in (("github_users", "--github-users"), ("names", "--authors"), ("emails", "--author-emails")):
+        if selected["identity"][key]:
+            common += [flag, *selected["identity"][key]]
+    if selected["use_git_credentials"]:
+        common.append("--use-git-credentials")
 
     # Step 1: Collect Git commits
     print(f">> [1/6] Collecting Git commits for {date_str}...")
-    git_cmd = [sys.executable, str(scripts_dir / "get_git_activity.py"), "--date", date_str, "--repos"] + args.repos
-    res_git = subprocess.run(git_cmd, capture_output=True, text=True, check=True)
-    commits_data = json.loads(res_git.stdout)
+    git_cmd = [sys.executable, str(scripts_dir / "get_git_activity.py"), "--date", date_str, "--envelope", *common]
+    git_result = run_source_collector(git_cmd, "git", "live")
+    commits_data = git_result["items"]
 
     # Step 2: Collect PRs
     print(f">> [2/6] Collecting PR activity for {date_str}...")
-    pr_cmd = [sys.executable, str(scripts_dir / "get_pr_activity.py"), "--date", date_str]
+    pr_cmd = [sys.executable, str(scripts_dir / "get_pr_activity.py"), "--date", date_str, *common]
     if args.prs_fixture:
         pr_cmd += ["--fixture", args.prs_fixture]
     pr_result = run_source_collector(pr_cmd, "github", "fixture" if args.prs_fixture is not None else "live")
 
     # Step 3: Collect Calendar events
     print(f">> [3/6] Collecting Calendar events for {date_str}...")
-    cal_cmd = [sys.executable, str(scripts_dir / "get_calendar_activity.py"), "--date", date_str]
+    cal_cmd = [sys.executable, str(scripts_dir / "get_calendar_activity.py"), "--date", date_str,
+               "--timezone", selected["timezone_name"]]
     if args.calendar_fixture:
         cal_cmd += ["--fixture", args.calendar_fixture]
     cal_result = run_source_collector(cal_cmd, "google_calendar", "fixture" if args.calendar_fixture is not None else "live")
@@ -101,13 +116,16 @@ def run():
     # Step 4: Normalize
     print(">> [4/6] Normalizing data and eliminating redundancy...")
     from normalize_activity import normalize_all
-    normalized = normalize_all(date_str, commits_data, pr_result["items"], cal_result["items"])
-    source_results = {"pull_requests": pr_result, "calendar": cal_result}
+    normalized = normalize_all(date_str, commits_data, pr_result["items"], cal_result["items"], selected["timezone_name"])
+    source_results = {"git": git_result, "pull_requests": pr_result, "calendar": cal_result}
     incomplete = any(result["status"] != "success" for result in source_results.values())
     demo = any(result["mode"] == "fixture" for result in source_results.values())
     collection = {
         "status": "incomplete" if incomplete else "demo" if demo else "complete",
         "sources": {name: source_metadata(result) for name, result in source_results.items()},
+        "identity": selected["identity"],
+        "repositories": selected["repos"],
+        "timezone": selected["timezone_name"],
     }
     for name, source in collection["sources"].items():
         print(f"   {name}: {source['status']} ({source['mode']}, {source['count']} items)")

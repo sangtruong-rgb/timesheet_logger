@@ -48,7 +48,16 @@ def build_time_blocks(normalized_data: Dict[str, Any]) -> List[Dict[str, Any]]:
 
     calendar = normalized_data.get("calendar", [])
     commits = normalized_data.get("commits", [])
-    prs = normalized_data.get("pull_requests", [])
+    # Associate each actual action at its own time, then deduplicate references
+    # within each block. One PR may legitimately have actions in two blocks.
+    prs = []
+    for reference in normalized_data.get("pull_requests", []):
+        if reference.get("events"):
+            for event in reference["events"]:
+                prs.append({**reference, "status": event["action"], "timestamp": event["timestamp"],
+                            "actor": event.get("actor"), "events": [event]})
+        else:
+            prs.append(reference)
 
     # Extract timezone from calendar or commits or default to system
     tz = datetime.datetime.now().astimezone().tzinfo or datetime.timezone.utc
@@ -272,6 +281,9 @@ def build_time_blocks(normalized_data: Dict[str, Any]) -> List[Dict[str, Any]]:
         for p in unassigned_prs:
             target_b["prs"].append(p)
 
+    from get_pr_activity import deduplicate_prs
+    for block in blocks:
+        block["prs"] = deduplicate_prs(block["prs"])
     return blocks
 
 

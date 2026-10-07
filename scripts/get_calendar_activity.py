@@ -17,6 +17,7 @@ import json
 import os
 import sys
 from typing import List, Dict, Any, Optional
+from zoneinfo import ZoneInfo
 
 from collection_result import (
     SourceUnavailable, collection_result, emit_result, load_fixture_records,
@@ -49,7 +50,8 @@ def parse_event_time(val: Any, default_tz: datetime.timezone) -> Optional[dateti
 def fetch_google_calendar_events(
     target_date: datetime.date,
     credentials_path: str = "credentials.json",
-    token_path: str = "token.json"
+    token_path: str = "token.json",
+    tz=None
 ) -> List[Dict[str, Any]]:
     """
     Attempt to fetch events via Google Calendar API if client libraries and credentials exist.
@@ -66,9 +68,9 @@ def fetch_google_calendar_events(
         creds = Credentials.from_authorized_user_file(token_path, ["https://www.googleapis.com/auth/calendar.readonly"])
         service = build("calendar", "v3", credentials=creds)
 
-        tz = get_local_timezone()
+        tz = tz or get_local_timezone()
         start_of_day = datetime.datetime.combine(target_date, datetime.time.min, tzinfo=tz).isoformat()
-        end_of_day = datetime.datetime.combine(target_date, datetime.time.max, tzinfo=tz).isoformat()
+        end_of_day = datetime.datetime.combine(target_date + datetime.timedelta(days=1), datetime.time.min, tzinfo=tz).isoformat()
 
         events_result = service.events().list(
             calendarId="primary",
@@ -97,9 +99,9 @@ def fetch_google_calendar_events(
         raise SourceUnavailable("Install google-auth and google-api-python-client for live Calendar") from exc
 
 
-def load_calendar_fixture(fixture_path: str, target_date: datetime.date) -> List[Dict[str, Any]]:
+def load_calendar_fixture(fixture_path: str, target_date: datetime.date, tz=None) -> List[Dict[str, Any]]:
     """Load and normalize events from a JSON fixture file."""
-    tz = get_local_timezone()
+    tz = tz or get_local_timezone()
     data = load_fixture_records(fixture_path)
     events = []
     for item in data:
@@ -117,11 +119,11 @@ def load_calendar_fixture(fixture_path: str, target_date: datetime.date) -> List
     return events
 
 
-def collect_calendar_activity(target_date, fixture_path=None):
+def collect_calendar_activity(target_date, fixture_path=None, tz=None):
     mode = "fixture" if fixture_path is not None else "live"
     try:
-        events = (load_calendar_fixture(fixture_path, target_date) if fixture_path is not None
-                  else fetch_google_calendar_events(target_date))
+        events = (load_calendar_fixture(fixture_path, target_date, tz) if fixture_path is not None
+                  else fetch_google_calendar_events(target_date, tz=tz))
         return collection_result("google_calendar", mode, "success", events)
     except SourceUnavailable as exc:
         return collection_result("google_calendar", mode, "unavailable", reason=str(exc))
@@ -132,6 +134,7 @@ def collect_calendar_activity(target_date, fixture_path=None):
 
 def main():
     parser = argparse.ArgumentParser(description="Collect Google Calendar events for a specific date.")
+    parser.add_argument("--timezone", help="IANA timezone shared with Git and PR collection")
     parser.add_argument(
         "--date",
         type=str,
@@ -154,6 +157,10 @@ def main():
 
     args = parser.parse_args()
 
+    try:
+        tz = ZoneInfo(args.timezone) if args.timezone else get_local_timezone()
+    except (KeyError, ValueError) as exc:
+        parser.error(str(exc))
     if args.date:
         try:
             target_date = datetime.date.fromisoformat(args.date)
@@ -161,9 +168,9 @@ def main():
             print(f"Error: Invalid date format '{args.date}'. Expected YYYY-MM-DD.", file=sys.stderr)
             sys.exit(1)
     else:
-        target_date = datetime.datetime.now().astimezone().date()
+        target_date = datetime.datetime.now(tz).date()
 
-    return emit_result(collect_calendar_activity(target_date, args.fixture), args.output)
+    return emit_result(collect_calendar_activity(target_date, args.fixture, tz), args.output)
 
 
 if __name__ == "__main__":

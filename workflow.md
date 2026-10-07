@@ -15,11 +15,11 @@ This document defines the complete daily execution sequence for the **Personal P
 
 | Step # | Classification | Step Name | Description | Reason for Classification |
 | :---: | :---: | :--- | :--- | :--- |
-| **1** | `[Script]` | **Resolve Date & Timezone** | Parse `--date YYYY-MM-DD` or detect local date & timezone offset (e.g. `+07:00`). | Deterministic calendar math. |
+| **1** | `[Script]` | **Resolve Date & Timezone** | Load the local identity/repository profile or CLI overrides; resolve `--date` in the selected IANA timezone. | Deterministic calendar math and configuration. |
 | **2** | `[Script]` | **Collect Git Commits** | Query local repos via `git log --all --date=iso-strict` or remote GitHub repos (`owner/repo`, HTTPS/SSH URLs) via GitHub REST API (`gh api` or direct HTTPS). Filter by author and local target date, extracting hashes and commit messages. | Deterministic log filtering, URL slug parsing, and API query execution. |
-| **3** | `[Script]` | **Collect PR Activity** | Query authenticated GitHub `gh`, or a fixture only when explicitly selected. Emit live/fixture provenance and success/unavailable/error; a failed subquery makes collection unsuccessful. | Deterministic API query and source status extraction. |
+| **3** | `[Script]` | **Collect PR Activity** | Use read-only GitHub REST via gh, an environment token, or opt-in Git credential helper. Scope to selected repos and all confirmed accounts. Fetch actual creation, review submission, and merge times. Fixtures require explicit selection; failed subrequests make the source unsuccessful. | Deterministic API query and source status extraction. |
 | **4** | `[Script]` | **Collect Calendar Events** | Use an authorized Google token or explicitly selected fixture. Emit source status; missing setup and request failures never turn into sample data. | Deterministic calendar API/file parsing and source status extraction. |
-| **5** | `[Script]` | **Normalize & Deduplicate** | Strip all extraneous API metadata. Deduplicate PRs by ID, merge status conflicts, and eliminate duplicated commits. | Deterministic set/dict operations. |
+| **5** | `[Script]` | **Normalize & Deduplicate** | Keep qualified repo/PR references and their distinct action events. Preserve commit identity-match provenance; deduplicate commits within their repository association. | Deterministic set/dict operations. |
 | **6** | `[Script]` | **Construct Time Blocks** | Interleave calendar events with standard workday intervals (`09:00–12:00`, `13:30–17:30`). If no calendar events exist, apply deterministic morning/afternoon split rule. | Pure scheduling interval segmentation. |
 | **7** | `[Script]` | **Associate Activities** | Match commit and PR timestamps against time block intervals (`start <= timestamp < end`). | Deterministic timestamp interval comparison. |
 | **8** | `[Script]` | **Pre-AI Ticket Grouping** | Scan commit messages and PR titles for ticket patterns (e.g., `PAY-123`). If detected, pre-cluster activities sharing the same ticket ID. | Deterministic regex matching (reduces AI work). |
@@ -34,9 +34,9 @@ This document defines the complete daily execution sequence for the **Personal P
 
 ## Collection Outcome Gate
 
-Before time blocking or AI, `[Script]` checks the PR/Calendar envelopes. A successful empty list remains empty. If either source is unavailable or failed, save only collected evidence as an **INCOMPLETE** draft under `data/timesheets/drafts/`, return exit code 2, and stop. Final timesheets, AI exports, and token records are untouched.
+Before time blocking or AI, `[Script]` checks Git/PR/Calendar envelopes. A successful empty list remains empty. If a source is unavailable or failed, save only collected evidence as an **INCOMPLETE** draft under `data/timesheets/drafts/`, return exit code 2, and stop. Final timesheets, AI exports, and token records are untouched. Remote Git/API failures are explicit; legacy local Git invalid-path/failure handling remains separate audit work.
 
-If both sources succeed but any fixture was explicitly selected, mark the run **DEMO**, isolate timesheet/manifests under `data/timesheets/demo/`, isolate AI exports under a sibling `demo/` directory, and skip production token updates. Successful live runs retain source metadata in their entry JSON and daily collection manifest. Existing Git collection failures are not yet covered by this source gate.
+If all sources succeed but any fixture was explicitly selected, mark the run **DEMO**, isolate timesheet/manifests under `data/timesheets/demo/`, isolate AI exports under a sibling `demo/` directory, and skip production token updates. Successful live runs retain source metadata and the selected identity/repositories/timezone in their entry JSON and daily collection manifest.
 
 ## 3. Token Budget
 

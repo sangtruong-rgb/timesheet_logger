@@ -37,9 +37,10 @@ def clean_commits(raw_commits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     cleaned = []
     for c in raw_commits:
         h = c.get("hash") or c.get("short_hash")
-        if not h or h in seen_hashes:
+        key = (c.get("repository", "default"), h)
+        if not h or key in seen_hashes:
             continue
-        seen_hashes.add(h)
+        seen_hashes.add(key)
         cleaned.append({
             "repository": str(c.get("repository", "default")),
             "hash": str(c.get("hash", h)),
@@ -47,43 +48,19 @@ def clean_commits(raw_commits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "timestamp": str(c.get("timestamp", "")),
             "author": str(c.get("author", "")),
             "message": str(c.get("message", "")).strip(),
-            "branch": c.get("branch")
+            "branch": c.get("branch"),
+            **({"github_author": c["github_author"]} if c.get("github_author") else {}),
+            **({"identity_match": c["identity_match"]} if c.get("identity_match") else {})
         })
     cleaned.sort(key=lambda x: x.get("timestamp", ""))
     return cleaned
 
 
 def clean_prs(raw_prs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    status_priority = {"merged": 3, "opened": 2, "reviewed": 1}
-    dedup_map: Dict[str, Dict[str, Any]] = {}
-
-    for p in raw_prs:
-        pid = p.get("id")
-        if pid is None:
-            continue
-        repo = p.get("repository", "")
-        key = f"{repo}#{pid}" if repo else f"#{pid}"
-
-        if key not in dedup_map:
-            dedup_map[key] = {
-                "id": pid,
-                "repository": str(repo),
-                "title": str(p.get("title", "")).strip(),
-                "status": str(p.get("status", "opened")),
-                "url": str(p.get("url", "")),
-                "timestamp": p.get("timestamp")
-            }
-        else:
-            curr_stat = p.get("status", "")
-            exist_stat = dedup_map[key].get("status", "")
-            if status_priority.get(curr_stat, 0) > status_priority.get(exist_stat, 0):
-                dedup_map[key]["status"] = curr_stat
-            if not dedup_map[key].get("timestamp") and p.get("timestamp"):
-                dedup_map[key]["timestamp"] = p.get("timestamp")
-
-    cleaned = list(dedup_map.values())
-    cleaned.sort(key=lambda x: str(x["id"]))
-    return cleaned
+    from get_pr_activity import deduplicate_prs
+    fields = ("id", "repository", "title", "status", "url", "timestamp", "actor", "events")
+    return [{key: pr[key] for key in fields if key in pr}
+            for pr in deduplicate_prs(raw_prs)]
 
 
 def clean_calendar(raw_events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -154,7 +131,7 @@ def main():
         return data  # Existing list-only fixtures remain supported.
 
     if args.commits_file and Path(args.commits_file).exists():
-        commits = json.loads(Path(args.commits_file).read_text(encoding="utf-8"))
+        commits = read_source(args.commits_file, "git")
     if args.prs_file and Path(args.prs_file).exists():
         prs = read_source(args.prs_file, "pull_requests")
     if args.calendar_file and Path(args.calendar_file).exists():

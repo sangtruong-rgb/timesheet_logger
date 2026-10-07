@@ -12,7 +12,7 @@ triggers:
 # Personal Timesheet Logger
 
 ## Purpose
-Automate personal daily timesheet logging by collecting verified activity from Git repositories, GitHub/GitLab Pull Requests, and Google Calendar.
+Automate personal daily timesheet logging by collecting verified activity from Git repositories, GitHub Pull Requests, and Google Calendar. GitLab PR support remains pending.
 
 Strictly follows the **[Script] vs [AI]** separation:
 - All deterministic data fetching, filtering, timezone handling, timestamp interval matching, PR deduplication, duration calculations, and file persistence are executed by Python scripts.
@@ -33,7 +33,7 @@ The full ordered sequence and deterministic breakdown are specified in:
 ## Invocation Steps for Claude Code
 
 1. **Determine Target Date**:
-   Extract target date from the user prompt (`YYYY-MM-DD`). If none is specified, use today's date in the local timezone.
+   Extract target date from the user prompt (`YYYY-MM-DD`). If none is specified, use today's date in the profile's IANA timezone. Load `config/user-config.json` when present, or pass an explicit `--config`; use all confirmed account/name/email aliases and the same repository selection for Git and PRs.
 
 2. **Execute Deterministic Pipeline (Phase 1)**:
    Run the orchestrator script to collect and prepare the minimal AI payload:

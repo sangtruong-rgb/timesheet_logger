@@ -13,6 +13,8 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from get_pr_activity import collect_pr_activity
+from collection_result import SourceUnavailable
+from github_api import GitHubAPIError
 from get_calendar_activity import collect_calendar_activity
 from run_pipeline import run_source_collector
 
@@ -22,16 +24,16 @@ TZ = datetime.timezone(datetime.timedelta(hours=7))
 
 class TestCollectionSources(unittest.TestCase):
     def test_empty_live_prs_do_not_load_fixture(self):
-        with patch("get_pr_activity.check_gh_cli", return_value=True), \
-                patch("get_pr_activity.subprocess.run", return_value=Mock(returncode=0, stdout="[]")) as query, \
+        with patch("get_pr_activity.GitHubAPI") as api, \
+                patch("get_pr_activity.query_gh_prs", return_value=[]) as query, \
                 patch("get_pr_activity.load_fixture") as fixture:
             result = collect_pr_activity(DATE)
         self.assertEqual(result, {"source": "github", "mode": "live", "status": "success", "items": []})
-        self.assertEqual(query.call_count, 3)
+        query.assert_called_once()
         fixture.assert_not_called()
 
     def test_missing_gh_is_unavailable_without_fixture(self):
-        with patch("get_pr_activity.shutil.which", return_value=None), \
+        with patch("get_pr_activity.GitHubAPI", side_effect=SourceUnavailable("Missing authentication")), \
                 patch("get_pr_activity.load_fixture") as fixture:
             result = collect_pr_activity(DATE)
         self.assertEqual(result["status"], "unavailable")
@@ -39,17 +41,18 @@ class TestCollectionSources(unittest.TestCase):
         fixture.assert_not_called()
 
     def test_unauthenticated_gh_is_unavailable(self):
-        with patch("get_pr_activity.shutil.which", return_value="gh"), \
-                patch("get_pr_activity.subprocess.run", return_value=Mock(returncode=1)) as cli:
-            result = collect_pr_activity(DATE)
-        self.assertEqual(result["status"], "unavailable")
+        import os
+        from github_api import GitHubAPI
+        with patch.dict(os.environ, {"GH_TOKEN": "", "GITHUB_TOKEN": ""}), \
+                patch("github_api.shutil.which", return_value="gh"), \
+                patch("github_api.subprocess.run", return_value=Mock(returncode=1)) as cli:
+            with self.assertRaises(SourceUnavailable):
+                GitHubAPI()
         self.assertEqual(cli.call_count, 1)
 
     def test_partial_pr_query_failure_is_not_success(self):
-        opened = Mock(returncode=0, stdout=json.dumps([{"number": 7, "title": "Real PR"}]))
-        failed = Mock(returncode=1, stdout="", stderr="query failed")
-        with patch("get_pr_activity.check_gh_cli", return_value=True), \
-                patch("get_pr_activity.subprocess.run", side_effect=[opened, failed]), \
+        with patch("get_pr_activity.GitHubAPI"), \
+                patch("get_pr_activity.query_gh_prs", side_effect=GitHubAPIError("Review request failed")), \
                 patch("get_pr_activity.load_fixture") as fixture:
             result = collect_pr_activity(DATE)
         self.assertEqual(result["status"], "error")
@@ -57,15 +60,15 @@ class TestCollectionSources(unittest.TestCase):
         fixture.assert_not_called()
 
     def test_invalid_live_pr_response_is_error(self):
-        for response in ("not json", "{}", "[null]", "[{}]", ""):
-            with self.subTest(response=response), \
-                    patch("get_pr_activity.check_gh_cli", return_value=True), \
-                    patch("get_pr_activity.subprocess.run", return_value=Mock(returncode=0, stdout=response)):
+        for error in (ValueError("Invalid JSON"), KeyError("created_at"), TypeError("Invalid items")):
+            with self.subTest(error=error), \
+                    patch("get_pr_activity.GitHubAPI"), \
+                    patch("get_pr_activity.query_gh_prs", side_effect=error):
                 self.assertEqual(collect_pr_activity(DATE)["status"], "error")
 
     def test_explicit_pr_fixture_is_labelled_and_does_not_query_live(self):
         with patch("get_pr_activity.get_local_timezone", return_value=TZ), \
-                patch("get_pr_activity.check_gh_cli") as auth:
+                patch("get_pr_activity.GitHubAPI") as auth:
             result = collect_pr_activity(DATE, str(ROOT / "data/fixtures/sample_prs.json"))
         self.assertEqual(result["mode"], "fixture")
         self.assertEqual(result["status"], "success")

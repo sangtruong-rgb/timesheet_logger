@@ -1,0 +1,12 @@
+{
+  "author": {
+    "names": ["Your Git Author Name", "Your Other Confirmed Author Name"],
+    "emails": []
+  },
+  "repositories": ["owner/repository"],
+  "timezone": "Asia/Ho_Chi_Minh",
+  "github": {
+    "users": ["your-github-login", "your-other-github-login"],
+    "use_git_credentials": false
+  }
+}
