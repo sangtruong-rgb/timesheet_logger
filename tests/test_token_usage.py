@@ -18,14 +18,14 @@ from collect_token_usage import parse_transcript_line_usage, parse_session_file,
 class TestTokenUsage(unittest.TestCase):
     def test_parse_transcript_line_usage_variants(self):
         # Format 1: direct usage
-        obj1 = {"usage": {"input_tokens": 150, "output_tokens": 40, "cache_read_input_tokens": 20}}
+        obj1 = {"usage": {"input_tokens": 150, "output_tokens": 40, "cache_read_input_tokens": 20, "cache_creation_input_tokens": 0}}
         i1, o1, c1 = parse_transcript_line_usage(obj1)
         self.assertEqual(i1, 150)
         self.assertEqual(o1, 40)
         self.assertEqual(c1, 20)
 
         # Format 2: message.usage
-        obj2 = {"message": {"usage": {"prompt_tokens": 120, "completion_tokens": 30}}}
+        obj2 = {"message": {"usage": {"prompt_tokens": 120, "completion_tokens": 30, "cache_read": 0, "cache_creation": 0}}}
         i2, o2, c2 = parse_transcript_line_usage(obj2)
         self.assertEqual(i2, 120)
         self.assertEqual(o2, 30)
@@ -33,10 +33,7 @@ class TestTokenUsage(unittest.TestCase):
 
         # Format 3: empty / no usage
         obj3 = {"event": "start"}
-        i3, o3, c3 = parse_transcript_line_usage(obj3)
-        self.assertEqual(i3, 0)
-        self.assertEqual(o3, 0)
-        self.assertEqual(c3, 0)
+        self.assertIsNone(parse_transcript_line_usage(obj3))
 
     def test_update_csv_idempotency(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -60,6 +57,7 @@ class TestTokenUsage(unittest.TestCase):
 
             # Second update with same session ID should update in place, not duplicate
             rec1_updated = dict(rec1)
+            rec1_updated["input_tokens"] = 370
             rec1_updated["total_tokens"] = 500
             update_csv(csv_path, [rec1_updated])
 

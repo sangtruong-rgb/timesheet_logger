@@ -302,20 +302,23 @@ def validate_calendar_context(context, target_date):
 
 
 def save_timesheet(entries, output_dir="data/timesheets", *, target_date, collection_status, calendar_context=None,
-                   unassigned_activity=None, collection_manifest=None, extra_files=None):
+                   unassigned_activity=None, collection_manifest=None, extra_files=None, token_records=None, token_csv=None):
     try:
         for path in (extra_files or {}):
             validate_auxiliary_output(path)
-        with directory_lock(output_dir, extra_paths=(extra_files or {})):
+        if token_records and token_csv is None:
+            raise TimesheetReconciliationError("Token CSV path required for usage")
+        extra = list(extra_files or {}) + ([token_csv] if token_records else [])
+        with directory_lock(output_dir, extra_paths=extra):
             return _save_timesheet(entries, output_dir, target_date=target_date, collection_status=collection_status,
                 calendar_context=calendar_context, unassigned_activity=unassigned_activity,
-                collection_manifest=collection_manifest, extra_files=extra_files)
+                collection_manifest=collection_manifest, extra_files=extra_files, token_records=token_records, token_csv=token_csv)
     except (OutputPathError, StorageError, OSError) as exc:
         raise TimesheetReconciliationError(str(exc)) from exc
 
 
 def _save_timesheet(entries, output_dir="data/timesheets", *, target_date, collection_status, calendar_context=None,
-                   unassigned_activity=None, collection_manifest=None, extra_files=None):
+                   unassigned_activity=None, collection_manifest=None, extra_files=None, token_records=None, token_csv=None):
     """Persist exactly one successful daily snapshot; [] explicitly clears generated rows."""
     try:
         if datetime.date.fromisoformat(target_date).isoformat() != target_date:
@@ -398,6 +401,16 @@ def _save_timesheet(entries, output_dir="data/timesheets", *, target_date, colle
             "unassigned_activity_count": len(unassigned), "activity_review_file": review_file.name if write_review else None,
             "review": {"status": "required" if unassigned or any(e.get("calendar_overlap") for e in merged) else "none"}}
         contents[dir_path / f"{target_date}.collection.json"] = json.dumps(manifest, indent=2)
+    if token_records:
+        try:
+            from collect_token_usage import csv_contents
+            token_content, _ = csv_contents(token_csv, token_records)
+            token_path = Path(token_csv)
+            if token_path.resolve() in reserved or token_path.resolve() in {Path(p).resolve() for p in (extra_files or {})}:
+                raise ValueError("Token CSV cannot overwrite timesheet/audit/AI output")
+            contents[token_path] = token_content
+        except (ValueError, TypeError, OSError) as exc:
+            raise TimesheetReconciliationError("Token CSV validation failed; final files and token records preserved") from exc
     write_bundle(contents, dir_path)
     return {"dates": {target_date: {**counts, "json_path": str(json_file), "md_path": str(md_file),
                                    "unassigned_activity_count": len(unassigned),

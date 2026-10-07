@@ -176,36 +176,35 @@ class TestTokenLocalDay(unittest.TestCase):
     def write(self,items):self.path.write_text('\n'.join(json.dumps(item) for item in items))
 
     def test_same_transcript_is_split_by_actual_local_day_not_relabelled(self):
-        self.write([{'timestamp':'2026-10-07T03:59:59Z','usage':{'input_tokens':10}},
-                    {'timestamp':'2026-10-07T04:00:00Z','usage':{'input_tokens':20}},
-                    {'timestamp':'2026-10-08T04:00:00Z','usage':{'input_tokens':30}}])
+        self.write([{'timestamp':'2026-10-07T03:59:59Z','usage':{'input_tokens':10,'output_tokens':0,'cache_read_input_tokens':0,'cache_creation_input_tokens':0}},
+                    {'timestamp':'2026-10-07T04:00:00Z','usage':{'input_tokens':20,'output_tokens':0,'cache_read_input_tokens':0,'cache_creation_input_tokens':0}},
+                    {'timestamp':'2026-10-08T04:00:00Z','usage':{'input_tokens':30,'output_tokens':0,'cache_read_input_tokens':0,'cache_creation_input_tokens':0}}])
         self.assertEqual(parse_session_file(self.path,'2026-10-06',NY)['input_tokens'],10)
         self.assertEqual(parse_session_file(self.path,'2026-10-07',NY)['input_tokens'],20)
         self.assertIn('America/New_York',parse_session_file(self.path,'2026-10-07',NY)['notes'])
 
     def test_f23_original_cross_day_reproduction_is_22_not_132_tokens(self):
-        self.write([{'timestamp':'2026-10-05T03:00:00Z','usage':{'input_tokens':100,'output_tokens':10}},
-                    {'timestamp':'2026-10-06T03:00:00Z','usage':{'input_tokens':20,'output_tokens':2}}])
+        self.write([{'timestamp':'2026-10-05T03:00:00Z','usage':{'input_tokens':100,'output_tokens':10,'cache_read_input_tokens':0,'cache_creation_input_tokens':0}},
+                    {'timestamp':'2026-10-06T03:00:00Z','usage':{'input_tokens':20,'output_tokens':2,'cache_read_input_tokens':0,'cache_creation_input_tokens':0}}])
         result=parse_session_file(self.path,'2026-10-06',ZoneInfo('Asia/Ho_Chi_Minh'))
         self.assertEqual(result['total_tokens'],22)
         self.assertEqual(result['input_tokens'],20)
         self.assertEqual(result['output_tokens'],2)
 
     def test_dst_fall_day_includes_both_instances_of_repeated_hour(self):
-        self.write([{'timestamp':'2026-11-01T01:30:00-04:00','usage':{'input_tokens':10}},
-                    {'timestamp':'2026-11-01T01:30:00-05:00','usage':{'input_tokens':20}},
-                    {'timestamp':'2026-11-02T00:00:00-05:00','usage':{'input_tokens':30}}])
+        self.write([{'timestamp':'2026-11-01T01:30:00-04:00','usage':{'input_tokens':10,'output_tokens':0,'cache_read_input_tokens':0,'cache_creation_input_tokens':0}},
+                    {'timestamp':'2026-11-01T01:30:00-05:00','usage':{'input_tokens':20,'output_tokens':0,'cache_read_input_tokens':0,'cache_creation_input_tokens':0}},
+                    {'timestamp':'2026-11-02T00:00:00-05:00','usage':{'input_tokens':30,'output_tokens':0,'cache_read_input_tokens':0,'cache_creation_input_tokens':0}}])
         self.assertEqual(parse_session_file(self.path,'2026-11-01',NY)['input_tokens'],30)
 
     def test_missing_invalid_naive_timestamps_are_not_assigned_to_requested_date(self):
-        self.write([{'usage':{'input_tokens':10}}, {'timestamp':'bad','usage':{'input_tokens':20}},
-                    {'timestamp':'2026-10-07T12:00:00','usage':{'input_tokens':30}}])
-        diagnostics=io.StringIO()
-        with contextlib.redirect_stderr(diagnostics):self.assertIsNone(parse_session_file(self.path,'2026-10-07',NY))
-        self.assertIn('skipped 3',diagnostics.getvalue())
+        self.write([{'usage':{'input_tokens':10,'output_tokens':0,'cache_read_input_tokens':0,'cache_creation_input_tokens':0}}, {'timestamp':'bad','usage':{'input_tokens':20,'output_tokens':0,'cache_read_input_tokens':0,'cache_creation_input_tokens':0}},
+                    {'timestamp':'2026-10-07T12:00:00','usage':{'input_tokens':30,'output_tokens':0,'cache_read_input_tokens':0,'cache_creation_input_tokens':0}}])
+        with self.assertRaisesRegex(ValueError,'valid timestamp'):
+            parse_session_file(self.path,'2026-10-07',NY)
 
     def test_file_mtime_does_not_determine_usage_date(self):
-        self.write([{'timestamp':'2026-01-01T15:00:00Z','usage':{'input_tokens':10}}])
+        self.write([{'timestamp':'2026-01-01T15:00:00Z','usage':{'input_tokens':10,'output_tokens':0,'cache_read_input_tokens':0,'cache_creation_input_tokens':0}}])
         os.utime(self.path,(0,0))
         self.assertEqual(parse_session_file(self.path,'2026-01-01',NY)['input_tokens'],10)
         self.assertIsNone(parse_session_file(self.path,'2026-01-02',NY))
@@ -237,7 +236,7 @@ class TestStandaloneTimezoneCLI(unittest.TestCase):
         normalized=self.invoke('normalize_activity.py',*override)
         self.assertEqual(json.loads(normalized.stdout)['timezone'],'Asia/Ho_Chi_Minh')
         csv_path=self.directory/'tokens.csv'
-        response=self.invoke('collect_token_usage.py','--record-usage','synthetic-run','1','2','3','--csv-path',str(csv_path),*override)
+        response=self.invoke('collect_token_usage.py','--run-id','run-1','--record-usage','synthetic-run','1','2','3','--csv-path',str(csv_path),*override)
         self.assertEqual(response.returncode,0,response.stderr)
         with csv_path.open() as handle:row=next(csv.DictReader(handle))
         self.assertEqual(row['date'],'2026-01-01');self.assertIn('Asia/Ho_Chi_Minh',row['notes'])
@@ -254,9 +253,12 @@ class TestStandaloneTimezoneCLI(unittest.TestCase):
 
     def test_token_cli_filters_internal_timestamps_using_profile(self):
         transcript=self.directory/'synthetic.jsonl'
-        transcript.write_text('\n'.join(json.dumps({'timestamp':timestamp,'usage':{'input_tokens':tokens}}) for timestamp,tokens in [('2026-01-01T04:59:59Z',10),('2026-01-01T05:00:00Z',20),('2026-01-02T05:00:00Z',30)]))
+        transcript.write_text('\n'.join(json.dumps({'timestamp':timestamp,'usage':{'input_tokens':tokens,'output_tokens':0,'cache_read_input_tokens':0,'cache_creation_input_tokens':0}}) for timestamp,tokens in [('2026-01-01T04:59:59Z',10),('2026-01-01T05:00:00Z',20),('2026-01-02T05:00:00Z',30)]))
         output=self.directory/'tokens.csv'
-        response=self.invoke('collect_token_usage.py','--session-file',str(transcript),'--csv-path',str(output))
+        manifest=self.directory/'run.json'
+        manifest.write_text(json.dumps({'run_id':'test-run','target_date':'2026-01-01','session_file':str(transcript),
+            'started_at':'2026-01-01T00:00:00-05:00','ended_at':'2026-01-02T00:00:00-05:00'}))
+        response=self.invoke('collect_token_usage.py','--run-manifest',str(manifest),'--csv-path',str(output))
         self.assertEqual(response.returncode,0,response.stderr)
         with output.open() as handle:row=next(csv.DictReader(handle))
         self.assertEqual(row['input_tokens'],'20');self.assertIn('America/New_York',row['notes'])
