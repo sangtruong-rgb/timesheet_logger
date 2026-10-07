@@ -90,7 +90,9 @@ def parse_github_repo_slug(repo_str: str) -> Optional[Tuple[str, str]]:
     if not repo_str:
         return None
 
-    # Explicit HTTP(S) URL (supports optional branch or subpath suffix)
+    if re.match(r"^https?://(?:www\.)?github\.com/[^/]+/[^/]+/(?:tree|blob)/", repo_str):
+        raise ValueError("Branch/file URLs are unsupported; use owner/repo for the default branch or a local checkout")
+    # Explicit HTTP(S) repository URL
     http_match = re.match(r"^https?://(?:www\.)?github\.com/([^/]+)/([^/#?]+?)(?:\.git)?(?:/.*)?$", repo_str)
     if http_match:
         return http_match.group(1), http_match.group(2)
@@ -161,16 +163,18 @@ def normalize_api_commits(
 
 
 def fetch_github_api_commits(
-    owner, repo, target_date, author=None, tz=None, use_git_credentials=False
+    owner, repo, target_date, author=None, tz=None, use_git_credentials=False, max_commits=10000
 ):
     """Read all default-branch pages; filter author dates by one local day."""
     tz = tz or get_local_timezone()
-    start, end = day_bounds(target_date, tz)
-    # GitHub's since/until filters use repository commit chronology; author
-    # dates are checked again below, with an exclusive next-day boundary.
+    # API since/until uses commit chronology and can miss backdated author dates.
+    # Scan a bounded complete default-branch history, then filter author dates.
     client = GitHubAPI(use_git_credentials)
-    raw = list(client.items(f"repos/{owner}/{repo}/commits",
-                           since=start.isoformat(), until=end.isoformat()))
+    raw = []
+    for item in client.items(f"repos/{owner}/{repo}/commits"):
+        if len(raw) >= max_commits:
+            raise ValueError("Remote history exceeds max-remote-commits; increase the explicit bound")
+        raw.append(item)
     return normalize_api_commits(raw, f"{owner}/{repo}", target_date, author, tz)
 
 
@@ -213,7 +217,7 @@ def filter_commits(commits, target_date, author=None, tz=None):
 def get_commits_for_repo(
     repo_path: str,
     target_date: datetime.date,
-    author_filter=None, tz=None
+    author_filter=None, tz=None, max_commits=10000
 ) -> List[Dict[str, Any]]:
     """Query git log in repo_path and return normalized commits for target_date in local timezone."""
     resolved_path = Path(repo_path).resolve()
@@ -225,11 +229,15 @@ def get_commits_for_repo(
                 capture_output=True, text=True, check=False
             )
             if check.returncode != 0:
-                return []
-        except Exception:
-            return []
+                raise ValueError("Explicit repository is not a Git worktree")
+        except Exception as exc:
+            raise ValueError("Explicit repository could not be opened") from exc
 
-    repo_name = resolved_path.name
+    try:
+        from activity_settings import github_repo
+        repo_name = github_repo(str(resolved_path))
+    except ValueError:
+        repo_name = "local:" + str(resolved_path)
     local_tz = tz or get_local_timezone()
 
     # Determine author filter if not provided
@@ -249,17 +257,19 @@ def get_commits_for_repo(
         "git", "-C", str(resolved_path),
         "log",
         "--all",
+        f"--max-count={max_commits + 1}",
         "--date=iso-strict",
         f"--format={format_spec}"
     ]
 
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=60)
         if result.returncode != 0:
-            return []
+            raise ValueError("Git log failed; source collection is not complete")
+        if len(result.stdout.splitlines()) > max_commits:
+            raise ValueError("Local history exceeds max-local-commits; increase the explicit bound before collecting")
     except Exception as e:
-        print(f"Error querying git in {repo_path}: {e}", file=sys.stderr)
-        return []
+        raise ValueError("Local Git query failed or exceeded its collection bound") from e
 
     commits: List[Dict[str, Any]] = []
     lines = result.stdout.strip().split("\n")
@@ -321,11 +331,15 @@ def main():
     parser.add_argument("--repos", nargs="+", default=None, help="Local paths or GitHub repositories")
     parser.add_argument("--author", help="Exact author name/email override; '*' for diagnostic all-author collection")
     parser.add_argument("--envelope", action="store_true", help="Include source status (used by pipeline)")
+    parser.add_argument("--max-local-commits", type=int, default=10000, help="History bound; exceeding it reports error, never partial success")
+    parser.add_argument("--max-remote-commits", type=int, default=10000, help="Default-branch history bound, preserving author-date filtering")
     parser.add_argument("--output", "-o", help="Output JSON file")
     add_settings_arguments(parser)
     args = parser.parse_args()
     try:
         selected = settings_from_args(args)
+        if min(args.max_local_commits, args.max_remote_commits) < 1:
+            raise ValueError("Commit history bounds must be positive")
         date = datetime.date.fromisoformat(args.date) if args.date else datetime.datetime.now(selected["timezone"]).date()
     except (ValueError, OSError, KeyError) as exc:
         parser.error(str(exc))
@@ -347,8 +361,8 @@ def main():
         seen = set()
         for target in selected["repos"]:
             slug = parse_github_repo_slug(target)
-            items = (fetch_github_api_commits(*slug, date, author, selected["timezone"], selected["use_git_credentials"])
-                     if slug else get_commits_for_repo(target, date, author, selected["timezone"]))
+            items = (fetch_github_api_commits(*slug, date, author, selected["timezone"], selected["use_git_credentials"], args.max_remote_commits)
+                     if slug else get_commits_for_repo(target, date, author, selected["timezone"], args.max_local_commits))
             for commit in items:
                 key = (commit["repository"], commit["hash"])
                 if key not in seen:

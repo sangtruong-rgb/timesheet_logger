@@ -18,6 +18,7 @@ import os
 import sys
 from typing import List, Dict, Any, Optional
 from activity_settings import add_timezone_arguments, timezone_settings, resolve_timezone
+from calendar_settings import add_calendar_arguments, calendar_settings
 
 from collection_result import (
     SourceUnavailable, collection_result, emit_result, load_fixture_records,
@@ -61,7 +62,7 @@ def fetch_google_calendar_events(
     target_date: datetime.date,
     credentials_path: str = "credentials.json",
     token_path: str = "token.json",
-    tz=None
+    tz=None, calendar_ids=None
 ) -> List[Dict[str, Any]]:
     """
     Attempt to fetch events via Google Calendar API if client libraries and credentials exist.
@@ -82,23 +83,35 @@ def fetch_google_calendar_events(
         start_of_day = datetime.datetime.combine(target_date, datetime.time.min, tzinfo=tz).isoformat()
         end_of_day = datetime.datetime.combine(target_date + datetime.timedelta(days=1), datetime.time.min, tzinfo=tz).isoformat()
 
-        events_result = service.events().list(
-            calendarId="primary",
+        parameters = dict(
             timeMin=start_of_day,
             timeMax=end_of_day,
             **({"timeZone": tz.key} if hasattr(tz, "key") else {}),
             singleEvents=True,
             orderBy="startTime"
-        ).execute()
-
-        items = events_result.get("items", [])
-        if not isinstance(items, list) or any(not isinstance(it, dict) for it in items):
-            raise ValueError("Invalid Calendar events response")
+        )
         events = []
-        for it in items:
-            event = normalize_calendar_event(it, target_date, tz)
-            if event is not None:
-                events.append(event)
+        for calendar_id in calendar_ids or ["primary"]:
+            page_token, seen = None, set()
+            while True:
+                response = service.events().list(calendarId=calendar_id, **parameters,
+                    **({"pageToken": page_token} if page_token else {})).execute()
+                if not isinstance(response, dict):
+                    raise ValueError("Invalid Calendar response")
+                items = response.get("items", [])
+                if not isinstance(items, list) or any(not isinstance(it, dict) for it in items):
+                    raise ValueError("Invalid Calendar events response")
+                for it in items:
+                    event = normalize_calendar_event(it, target_date, tz)
+                    if event is not None:
+                        event.update({"calendar_id": calendar_id, "source": "google_calendar"})
+                        events.append(event)
+                page_token = response.get("nextPageToken")
+                if not page_token:
+                    break
+                if not isinstance(page_token, str) or page_token in seen:
+                    raise ValueError("Invalid/repeated Calendar page token; collection cannot be complete")
+                seen.add(page_token)
         return events
     except ImportError as exc:
         raise SourceUnavailable("Install google-auth and google-api-python-client for live Calendar") from exc
@@ -110,24 +123,45 @@ def normalize_calendar_event(item, target_date, tz):
         return (isinstance(value, dict) and "date" in value and "dateTime" not in value
                 or isinstance(value, str) and len(value) == 10)
 
+    if item.get("status") == "cancelled":
+        return None
+    attendees = item.get("attendees", [])
+    if not isinstance(attendees, list) or any(not isinstance(person, dict) for person in attendees):
+        raise ValueError("Invalid Calendar attendee metadata")
+    if any(person.get("self") is True and person.get("responseStatus") == "declined" for person in attendees):
+        return None
     start, end = item.get("start"), item.get("end")
     all_day = is_date(start)
     if is_date(end) != all_day or item.get("all_day", all_day) != all_day:
         raise ValueError("Calendar dates/times and all_day flag must agree")
     s, e = parse_event_time(start, tz), parse_event_time(end, tz)
-    if not s or not e or e <= s:
+    if not s or not e or e.astimezone(datetime.timezone.utc) <= s.astimezone(datetime.timezone.utc):
         raise ValueError("Calendar requires valid start and end after start")
     title = item.get("summary", item.get("title", "Untitled event"))
     if all_day:
         if not s.date() <= target_date < e.date():
             return None
-        return {"title": title, "start": s.date().isoformat(), "end": e.date().isoformat(), "all_day": True}
+        record = {"title": title, "start": s.date().isoformat(), "end": e.date().isoformat(), "all_day": True}
+        return calendar_evidence(item, record)
     day_start = datetime.datetime.combine(target_date, datetime.time.min, tzinfo=tz)
     day_end = datetime.datetime.combine(target_date + datetime.timedelta(days=1), datetime.time.min, tzinfo=tz)
     if s >= day_end or e <= day_start:
         return None
     # Original event extent is retained; daily clipping happens in block construction.
-    return {"title": title, "start": s.isoformat(), "end": e.isoformat()}
+    return calendar_evidence(item, {"title": title, "start": s.isoformat(), "end": e.isoformat()})
+
+
+def calendar_evidence(item, record):
+    for original, field in (("id", "event_id"), ("event_id", "event_id"), ("calendar_id", "calendar_id"),
+                            ("source", "source"), ("status", "status"), ("recurringEventId", "recurring_event_id")):
+        if item.get(original) is not None:
+            if not isinstance(item[original], str):
+                raise ValueError("Calendar evidence identity must be a string")
+            record[field] = item[original]
+    for person in item.get("attendees", []):
+        if person.get("self") is True and isinstance(person.get("responseStatus"), str):
+            record["self_response_status"] = person["responseStatus"]
+    return record
 
 
 def load_calendar_fixture(fixture_path: str, target_date: datetime.date, tz=None) -> List[Dict[str, Any]]:
@@ -143,11 +177,11 @@ def load_calendar_fixture(fixture_path: str, target_date: datetime.date, tz=None
     return events
 
 
-def collect_calendar_activity(target_date, fixture_path=None, tz=None):
+def collect_calendar_activity(target_date, fixture_path=None, tz=None, calendar_options=None):
     mode = "fixture" if fixture_path is not None else "live"
     try:
         events = (load_calendar_fixture(fixture_path, target_date, tz) if fixture_path is not None
-                  else fetch_google_calendar_events(target_date, tz=tz))
+                  else fetch_google_calendar_events(target_date, tz=tz, **(calendar_options or {})))
         return collection_result("google_calendar", mode, "success", events)
     except SourceUnavailable as exc:
         return collection_result("google_calendar", mode, "unavailable", reason=str(exc))
@@ -159,6 +193,7 @@ def collect_calendar_activity(target_date, fixture_path=None, tz=None):
 def main():
     parser = argparse.ArgumentParser(description="Collect Google Calendar events for a specific date.")
     add_timezone_arguments(parser)
+    add_calendar_arguments(parser)
     parser.add_argument(
         "--date",
         type=str,
@@ -183,6 +218,7 @@ def main():
 
     try:
         _, tz = timezone_settings(args.config, args.timezone)
+        options = calendar_settings(args.config, args.calendar_token, args.calendar_credentials, args.calendar_ids)
     except (KeyError, ValueError, OSError) as exc:
         parser.error(str(exc))
     if args.date:
@@ -194,7 +230,7 @@ def main():
     else:
         target_date = datetime.datetime.now(tz).date()
 
-    return emit_result(collect_calendar_activity(target_date, args.fixture, tz), args.output)
+    return emit_result(collect_calendar_activity(target_date, args.fixture, tz, options), args.output)
 
 
 if __name__ == "__main__":

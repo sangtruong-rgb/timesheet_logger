@@ -96,7 +96,7 @@ class TestCalendarDailyScope(unittest.TestCase):
             live = fetch_google_calendar_events(DAY, tz=TZ)
         with tempfile.TemporaryDirectory() as directory:
             path=Path(directory)/'events.json';path.write_text(json.dumps(records));fixture=load_calendar_fixture(str(path),DAY,TZ)
-        self.assertCountEqual(live, fixture)
+        self.assertCountEqual(live, [{**item, 'calendar_id':'primary', 'source':'google_calendar'} for item in fixture])
         kwargs=service.events.return_value.list.call_args.kwargs
         self.assertEqual(kwargs['timeMin'], DATE+'T00:00:00+07:00')
         self.assertEqual(kwargs['timeMax'], '2026-10-08T00:00:00+07:00')

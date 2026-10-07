@@ -44,10 +44,12 @@ def format_pr_suffix(prs: List[Dict[str, Any]]) -> str:
     """Deterministically format PR suffix: 'PRs: #101, #102' or 'PRs: None'."""
     if not prs:
         return "PRs: None"
-    pr_ids = sorted(list(set(str(p.get("id")) for p in prs if p.get("id") is not None)), key=lambda x: int(x) if x.isdigit() else x)
-    if not pr_ids:
+    references = sorted({(p.get("repository", ""), p["id"]) for p in prs if p.get("id") is not None},
+                        key=lambda value: (int(value[1]), value[0]))
+    if not references:
         return "PRs: None"
-    pr_tags = [f"#{pid}" for pid in pr_ids]
+    ambiguous = {pid for _, pid in references if sum(other == pid for _, other in references) > 1}
+    pr_tags = [f"{repo or '(unknown repository)'}#{pid}" if pid in ambiguous else f"#{pid}" for repo, pid in references]
     return f"PRs: {', '.join(pr_tags)}"
 
 
@@ -193,6 +195,7 @@ def build_entries(
             "block_id": key,
             "summary_source": "ai" if ai_match else "fallback",
             **({"time_basis": b["time_basis"]} if "time_basis" in b else {}),
+            **({"attendance": "unconfirmed"} if b.get("time_basis") == "scheduled" else {}),
             **({"estimation_reason": b["estimation_reason"]} if "estimation_reason" in b else {}),
             **({"calendar_overlap": True, "review": b["review"]} if b.get("calendar_overlap") else {}),
             "entry": {

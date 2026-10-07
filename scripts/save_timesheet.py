@@ -77,6 +77,9 @@ def render_markdown(date_str: str, items: List[Dict[str, Any]], collection_statu
         lines[4:4] = ["> DEMO: contains explicitly selected fixture data; not a live work record.", ""]
 
     has_estimates = any(item.get("time_basis") == "estimated" for item in items)
+    has_schedule = any(item.get("time_basis") == "scheduled" for item in items)
+    if has_schedule:
+        lines[4:4] = ["> Theo lịch, chưa xác nhận tham dự. Scheduled intervals are proposals, including future meetings; they are not confirmed work time.", ""]
     has_overlap = any(item.get("calendar_overlap") for item in items)
     if has_overlap:
         lines[4:4] = ["> REVIEW REQUIRED: overlapping Calendar events need attendance confirmation. Scheduled coverage is not confirmed meeting time.", ""]
@@ -105,7 +108,7 @@ def render_markdown(date_str: str, items: List[Dict[str, Any]], collection_statu
         if it.get("calendar_overlap"):
             overlap_minutes += dur
             duration_text += " — attendance review required"
-        desc = e.get("description", "").replace("\n", " ").replace("|", "\\|")
+        desc = markdown_cell(e.get("description", ""))
 
         src_parts = []
         cals = s.get("calendar", [])
@@ -117,16 +120,16 @@ def render_markdown(date_str: str, items: List[Dict[str, Any]], collection_statu
         if commits:
             src_parts.append(f"{len(commits)} commit{'s' if len(commits) > 1 else ''}")
         if prs:
-            pr_tags = [f"#{p.get('id')}" for p in prs if p.get('id') is not None]
-            src_parts.append(f"PRs: {', '.join(pr_tags)}")
+            from build_timesheet import format_pr_suffix
+            src_parts.append(format_pr_suffix(prs))
 
-        evidence_str = "; ".join(src_parts) if src_parts else "Manual"
+        evidence_str = markdown_cell("; ".join(src_parts) if src_parts else "Manual")
         lines.append(f"| {start} – {end} | {duration_text} | {desc} | {evidence_str} |")
 
     hours = total_minutes // 60
     mins = total_minutes % 60
     lines.append("")
-    total_label = "Total Proposed Time" if has_estimates or has_overlap or unassigned_activity else "Total Tracked Time"
+    total_label = "Total Proposed Time" if has_estimates or has_schedule or has_overlap or unassigned_activity else "Total Tracked Time"
     lines.append(f"**{total_label}:** {total_minutes} mins ({hours}h {mins:02d}m)")
     if any(item.get("time_basis") in ("scheduled", "estimated") for item in items):
         lines.append(f"Scheduled Calendar: {scheduled_minutes} mins; estimated development: {estimated_minutes} mins; "
@@ -155,6 +158,10 @@ def render_markdown(date_str: str, items: List[Dict[str, Any]], collection_statu
             lines.append(f"- {identity} — {timestamp}; {REASONS[record['reason']]}.".replace("\n", " "))
         lines.append("")
     return "\n".join(lines)
+
+
+def markdown_cell(value):
+    return str(value).replace("\\", "\\\\").replace("|", "\\|").replace("\r", " ").replace("\n", " ")
 
 
 def entry_interval(item, target_date):

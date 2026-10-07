@@ -37,7 +37,9 @@ def extract_tickets(texts: List[str]) -> List[str]:
 def prepare_ai_payload_for_block(block: Dict[str, Any]) -> Dict[str, Any]:
     calendar_titles = [t.strip() for t in block.get("calendar_titles", []) if t.strip()]
     commit_messages = [c.get("message", "").strip() for c in block.get("commits", []) if c.get("message", "").strip()]
-    prs = [{"id": p.get("id"), "title": p.get("title", "").strip()} for p in block.get("prs", []) if p.get("id") is not None]
+    prs = [{"id": p.get("id"), "title": p.get("title", "").strip(),
+            **({"repository": p["repository"]} if p.get("repository") else {})}
+           for p in block.get("prs", []) if p.get("id") is not None]
 
     # Pre-extract ticket keys if any
     all_text = commit_messages + [p["title"] for p in prs]

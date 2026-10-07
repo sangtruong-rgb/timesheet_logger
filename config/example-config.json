@@ -1,37 +1,32 @@
 {
   "author": {
-    "name": "Sang Truong",
-    "email": "sang.truong@local"
+    "names": [
+      "Your Name"
+    ],
+    "emails": [
+      "you@example.com"
+    ]
   },
   "repositories": [
-    "."
+    "owner/repository"
   ],
   "timezone": "Asia/Ho_Chi_Minh",
-  "workday": {
-    "start": "09:00",
-    "end": "18:00",
-    "lunch_start": "12:00",
-    "lunch_end": "13:30"
-  },
   "github": {
-    "enabled": false,
-    "token_env": "GITHUB_TOKEN",
-    "repositories": []
-  },
-  "gitlab": {
-    "enabled": false,
-    "token_env": "GITLAB_TOKEN",
-    "projects": []
+    "users": [
+      "your-login"
+    ],
+    "use_git_credentials": false
   },
   "calendar": {
-    "provider": "fixture",
-    "google_token_path": "token.json",
-    "google_credentials_path": "credentials.json",
-    "ical_path": null,
-    "fixture_path": "data/fixtures/sample_calendar.json"
+    "provider": "google",
+    "calendar_ids": [
+      "primary"
+    ],
+    "token_path": "../token.json",
+    "credentials_path": "../credentials.json"
   },
   "token_tracking": {
     "claude_dir": "~/.claude",
-    "csv_path": "data/token-usage.csv"
+    "csv_path": "../data/token-usage.csv"
   }
 }

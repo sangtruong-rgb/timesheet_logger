@@ -37,8 +37,10 @@ Automated, deterministic timesheet logging skill for Claude Code that combines G
 - **Git**: Configured locally with author identity (`git config user.name`, `git config user.email`).
 - **GitHub**: Use an existing authenticated `gh`, an environment-only `GH_TOKEN` / `GITHUB_TOKEN`, or explicitly opt in to the existing Git credential helper with `github.use_git_credentials: true`. The helper is queried for `github.com` without interactive prompts; credentials remain in memory. Tokens are never part of the JSON profile. Git and PR collectors use the same read-only REST adapter. GitLab PR collection is not implemented.
 - **Google Calendar (Optional)**:
-  - Place OAuth credentials in `credentials.json` or authorized token in `token.json`.
-  - ICS collection remains pending.
+  - Install optional Google dependencies with `python3 -m pip install -r requirements-calendar.txt`.
+  - For initial desktop OAuth, run `python3 scripts/setup_calendar_oauth.py`; only `calendar.readonly` is requested. Existing tokens are preserved unless `--replace` is explicitly passed.
+  - Live collection uses the authorized token; the client credentials file is used only for bootstrap.
+  - ICS files and GitLab MR collection are unsupported. No configuration switch enables them.
   - Live collection requires an already-authorized `token.json`, `google-auth`, and `google-api-python-client`. Missing setup is reported as unavailable. The no-calendar workday fallback applies only after successful collection returns no events, or in an explicit demo.
 
 ---
@@ -413,7 +415,7 @@ python3 -m unittest discover tests
 
 ## 6. Troubleshooting
 
-1. **GitHub/GitLab CLI not authenticated**:
+1. **GitHub authentication unavailable**:
    - Error: `gh: command not found` or not logged in.
    - Solution: Use one of the GitHub authentication mechanisms described above. A credential that can read a repository may lack the extra `read:org` scope required by `gh auth login`; opt-in reuse through the existing Git helper or an environment token can still access the REST endpoints. For demos, explicitly select both fixtures. An unavailable source produces an incomplete draft.
 2. **Google Calendar not configured**:
@@ -427,3 +429,41 @@ python3 -m unittest discover tests
    - If `~/.claude` has no transcripts yet, `collect_token_usage.py` initializes `data/token-usage.csv` with standard headers without error.
 6. **Timezone mismatch**:
    - All timestamps respect local timezone offset (e.g. `+07:00`). Commit timestamps near midnight are correctly attributed to the local calendar day.
+
+### Source configuration and audit identities
+
+GitHub is the supported Git/PR provider. GitLab and ICS adapters are not implemented
+and unused configuration switches have been removed. Calendar supports CLI
+`--calendar-token`, `--calendar-credentials`, `--calendar-ids`; exported
+`GOOGLE_CALENDAR_TOKEN`/`GOOGLE_CALENDAR_CREDENTIALS` override profile paths.
+Profile-relative paths resolve against the profile directory; CLI/env paths resolve
+against the invoking working directory, and defaults use the repository root.
+`TIMESHEET_REPOS` is comma-separated, below CLI and above profile. `.env` is not
+automatically loaded: export individual variables in your shell.
+
+Google Calendar pages are exhausted using `nextPageToken`; malformed/repeated tokens
+or a failed later page report source error rather than complete partial data.
+Calendar evidence keeps event ID, calendar ID and source alongside original bounds;
+identical-looking events with different IDs remain distinct for overlap review.
+See [Google pagination](https://developers.google.com/workspace/calendar/api/guides/pagination).
+
+Commit identities use owner/repository when a GitHub origin exists; otherwise a
+canonical absolute local-path identity prevents basename collisions. Equal PR numbers
+from different repositories are qualified as `owner/repo#N` in ambiguous suffixes
+and kept distinct in AI input. Calendar evidence is escaped in Markdown table cells.
+
+Local Git covers all refs, filters author dates and is bounded by
+`--max-local-commits` (default 10000) and a 60-second query timeout. Exceeding the
+bound is an error requiring an explicit larger bound, never a successful truncated
+result. Remote Git scans default-branch history with `--max-remote-commits` (default
+10000), then filters author dates. It deliberately avoids the API's committer-date
+since/until filter, which can exclude backdated author events. Exceeding a bound
+reports error, so large repositories need an explicit larger bound. Branch/file GitHub URLs are rejected: supply owner/repo
+or use a local checkout when all-ref author-date coverage is required.
+
+Calendar policy approved on 2026-10-07: default primary; cancelled and self-declined
+events are excluded. All-day events are context only. Overlaps require attendance
+review. Keep the entire day's schedule, including future meetings, as proposals.
+JSON scheduled rows have `attendance: unconfirmed`; Markdown explicitly states
+“Theo lịch, chưa xác nhận tham dự”. Accepting an invitation does not establish
+attendance, and scheduled/estimated totals are not measured working hours.

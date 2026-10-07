@@ -142,10 +142,10 @@ def clean_calendar(raw_events):
         if not isinstance(all_day, bool):
             _fail("google_calendar", index, "all_day must be a boolean")
         record = {"title": title, "start": start, "end": end, **({"all_day": True} if all_day else {})}
-        for field in ("original_start", "original_end"):
+        for field in ("original_start", "original_end", "event_id", "calendar_id", "source", "status", "recurring_event_id", "self_response_status"):
             if field in ev:
                 record[field] = _text(ev, field, "google_calendar", index)
-        key = (title, start, end, all_day)
+        key = (record.get("calendar_id"), record.get("event_id"), title, start, end, all_day)
         if key not in seen:
             seen.add(key)
             cleaned.append(record)
@@ -243,8 +243,9 @@ def normalize_all(target_date, commits, prs, calendar, timezone_str=None):
         reference["events"].sort(key=lambda event: timestamp_sort_key(event["timestamp"]))
     active_prs.sort(key=lambda reference: (timestamp_sort_key(reference["events"][0]["timestamp"]),
                                          reference["repository"], reference["id"]))
-    timed.sort(key=lambda event: (timestamp_sort_key(event["start"]), timestamp_sort_key(event["end"]), event["title"]))
-    context.sort(key=lambda event: (event["start"], event["end"], event["title"]))
+    timed.sort(key=lambda event: (timestamp_sort_key(event["start"]), timestamp_sort_key(event["end"]), event["title"],
+                                  event.get("calendar_id", ""), event.get("event_id", "")))
+    context.sort(key=lambda event: (event["start"], event["end"], event["title"], event.get("calendar_id", ""), event.get("event_id", "")))
     unassigned.sort(key=lambda record: (timestamp_sort_key(record["activity"].get("timestamp", record["activity"].get("start"))),
                                        record["source"], str(record["activity"].get("hash", record["activity"].get("id", record["activity"].get("title", ""))))))
     return {"date": target_date, "timezone": zone_name, "calendar": timed, "calendar_context": context,
