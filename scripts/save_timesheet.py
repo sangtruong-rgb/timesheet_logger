@@ -12,7 +12,6 @@ exact-interval overrides, and refuses ambiguous legacy stores or conflicts.
 """
 
 import re
-import contextlib
 import argparse
 import datetime
 import json
@@ -325,14 +324,10 @@ def save_timesheet(entries, output_dir="data/timesheets", *, target_date, collec
     try:
         for path in (extra_files or {}):
             validate_auxiliary_output(path)
+        if token_records and token_csv is None:
+            raise TimesheetReconciliationError("Token CSV path required for usage")
         extra = list(extra_files or {}) + ([token_csv] if token_records else [])
-        directories = {Path(output_dir).resolve()}
-        if token_records:
-            if token_csv is None: raise TimesheetReconciliationError("Token CSV path required for usage")
-            directories.add(Path(token_csv).resolve().parent)
-        with contextlib.ExitStack() as stack:
-            for directory in sorted(directories, key=str):
-                stack.enter_context(directory_lock(directory, extra_paths=extra))
+        with directory_lock(output_dir, extra_paths=extra):
             return _save_timesheet(entries, output_dir, target_date=target_date, collection_status=collection_status,
                 calendar_context=calendar_context, unassigned_activity=unassigned_activity,
                 collection_manifest=collection_manifest, extra_files=extra_files, token_records=token_records, token_csv=token_csv)

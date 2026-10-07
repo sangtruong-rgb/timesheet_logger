@@ -37,3 +37,4 @@ data/raw/demo/
 # Local transactional storage metadata (never publish rollback contents)
 .timesheet.lock
 .timesheet-transaction.json
+.timesheet-pending.json

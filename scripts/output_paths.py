@@ -9,7 +9,7 @@ class OutputPathError(ValueError):
 
 
 DAILY_FILE = re.compile(r"\d{4}-\d{2}-\d{2}(?:\.(?:collection|calendar-context|activity-review))?\.(?:json|md)$")
-RESERVED_NAMES = {"token.json", "credentials.json", ".timesheet.lock", ".timesheet-transaction.json"}
+RESERVED_NAMES = {"token.json", "credentials.json", ".timesheet.lock", ".timesheet-transaction.json", ".timesheet-pending.json"}
 
 
 def same_location(first, second):
