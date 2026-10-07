@@ -52,7 +52,7 @@ class TestPipelineTimezone(unittest.TestCase):
         self.assertEqual(rows[0]['collection']['timezone'],'America/New_York')
         manifest=json.loads((self.output/'2026-01-01.collection.json').read_text())
         self.assertEqual(manifest['timezone'],'America/New_York')
-        self.assertEqual(manifest['review']['status'],'none')
+        self.assertEqual(manifest['review']['status'],'required')
         self.assertEqual(json.loads(self.ai.read_text())['blocks'][0]['block']['start'],'10:00')
         for source,command in self.calls:
             self.assertEqual(command[command.index('--timezone')+1],'America/New_York')

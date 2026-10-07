@@ -15,8 +15,8 @@ class StorageError(ValueError):
 
 def atomic_write(path, content):
     path = Path(path)
-    if path.is_symlink():
-        raise StorageError("Refusing to replace a symlink output")
+    if path.is_symlink() or path.name in ("token.json", "credentials.json"):
+        raise StorageError("Refusing to replace a symlink or OAuth output")
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(prefix=".timesheet-", dir=path.parent)
     try:

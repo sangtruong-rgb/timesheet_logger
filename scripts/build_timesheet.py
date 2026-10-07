@@ -242,12 +242,17 @@ def main():
     out_json = json.dumps({"entries": entries, "unassigned_activity": unassigned}
                           if unassigned is not None else entries, indent=2)
 
-    if args.output and args.output != "-":
-        out_p = Path(args.output)
-        out_p.parent.mkdir(parents=True, exist_ok=True)
-        out_p.write_text(out_json, encoding="utf-8")
-    else:
-        print(out_json)
+    try:
+        if args.output and args.output != "-":
+            from atomic_storage import directory_lock, atomic_write
+            out_p = Path(args.output)
+            with directory_lock(out_p.parent):
+                atomic_write(out_p, out_json)
+        else:
+            print(out_json)
+    except (ValueError, OSError) as exc:
+        print(f"Output blocked: {exc}", file=sys.stderr)
+        return 2
     return 0
 
 

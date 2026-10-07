@@ -86,7 +86,7 @@ class TestPipelineActivityReview(unittest.TestCase):
         self.assertEqual(self.pipeline([meeting()],prs=[pr()]),0)
         self.assertEqual(self.pipeline([meeting()],prs=[pr('15:30')]),0)
         self.assertEqual(self.read('.activity-review')['unassigned_activity'],[])
-        self.assertEqual(self.read('.collection')['review']['status'],'none')
+        self.assertEqual(self.read('.collection')['review']['status'],'required')
         self.assertNotIn('Unassigned activity',(self.output/f'{DATE}.md').read_text())
         self.assertEqual(self.read('')[0]['sources']['pull_requests'][0]['id'],55)
 

@@ -1,0 +1,67 @@
+{
+  "date": "2026-10-07",
+  "timezone": "Asia/Ho_Chi_Minh",
+  "calendar": [
+    {
+      "title": "Synthetic meeting A",
+      "start": "2026-10-07T09:00:00+07:00",
+      "end": "2026-10-07T10:00:00+07:00",
+      "event_id": "synthetic-a",
+      "calendar_id": "synthetic-calendar",
+      "source": "synthetic"
+    },
+    {
+      "title": "Synthetic meeting B",
+      "start": "2026-10-07T09:30:00+07:00",
+      "end": "2026-10-07T10:30:00+07:00",
+      "event_id": "synthetic-b",
+      "calendar_id": "synthetic-calendar",
+      "source": "synthetic"
+    }
+  ],
+  "calendar_context": [],
+  "commits": [
+    {
+      "repository": "demo/work",
+      "hash": "synthetic-commit-001",
+      "short_hash": "synthet",
+      "timestamp": "2026-10-07T10:45:00+07:00",
+      "author": "Synthetic Author",
+      "message": "DEMO-1 Fix validation",
+      "branch": null
+    }
+  ],
+  "pull_requests": [
+    {
+      "id": 7,
+      "repository": "demo-one/work",
+      "title": "DEMO-1 Validation",
+      "status": "reviewed",
+      "timestamp": "2026-10-07T09:45:00+07:00",
+      "actor": "synthetic-user",
+      "events": [
+        {
+          "action": "reviewed",
+          "timestamp": "2026-10-07T09:45:00+07:00",
+          "actor": "synthetic-user"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "repository": "demo-two/work",
+      "title": "DEMO-1 Validation",
+      "status": "reviewed",
+      "timestamp": "2026-10-07T09:45:00+07:00",
+      "actor": "synthetic-user",
+      "events": [
+        {
+          "action": "reviewed",
+          "timestamp": "2026-10-07T09:45:00+07:00",
+          "actor": "synthetic-user"
+        }
+      ]
+    }
+  ],
+  "unassigned_activity": []
+}

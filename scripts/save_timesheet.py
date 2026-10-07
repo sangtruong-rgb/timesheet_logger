@@ -11,6 +11,7 @@ Replaces obsolete generated rows, preserves explicitly marked manual rows and
 exact-interval overrides, and refuses ambiguous legacy stores or conflicts.
 """
 
+import re
 import contextlib
 import argparse
 import datetime
@@ -208,6 +209,21 @@ def entry_interval(item, target_date):
     return start, end
 
 
+def validate_generated_suffix(item):
+    try:
+        from build_timesheet import format_pr_suffix
+        references = item.get("sources", {}).get("pull_requests", [])
+        for pr in references:
+            if isinstance(pr.get("id"), bool) or not isinstance(pr.get("id"), int) or pr["id"] < 1:
+                raise ValueError("Invalid PR identity")
+            if not isinstance(pr.get("repository", ""), str): raise ValueError("Invalid repository")
+        description = item["entry"]["description"]
+        if len(re.findall(r"\bPRs\s*:", description, re.IGNORECASE)) != 1 or not description.endswith(format_pr_suffix(references)):
+            raise ValueError("Suffix conflicts with source references")
+    except (ValueError, TypeError, KeyError) as exc:
+        raise TimesheetReconciliationError("Generated description must end with exactly one script-owned suffix matching its source PRs") from exc
+
+
 def reconcile_daily_entries(existing, incoming, target_date, collection_status):
     """Replace the generated set, not just matching keys; never infer legacy ownership."""
     if collection_status not in ("complete", "demo"):
@@ -228,6 +244,7 @@ def reconcile_daily_entries(existing, incoming, target_date, collection_status):
                 "Legacy rows lack provenance: back up and classify them as generated, manual, or override before rerunning")
         kind = provenance.get("kind")
         if kind == "generated" and provenance.get("generator") == "timesheet_logger":
+            validate_generated_suffix(item)
             old_generated[key] = item
         elif kind in ("manual", "override"):
             protected.append(item)
@@ -245,6 +262,7 @@ def reconcile_daily_entries(existing, incoming, target_date, collection_status):
             values = item.get("sources", {}).get(field, [])
             if not isinstance(values, list) or any(not isinstance(v, str if field == "calendar" else dict) for v in values):
                 raise TimesheetReconciliationError("Invalid generated source evidence arrays")
+        validate_generated_suffix(item)
         provenance = item.get("provenance")
         if provenance is not None and provenance != {"kind": "generated", "generator": "timesheet_logger"}:
             raise TimesheetReconciliationError("Incoming snapshots may only contain pipeline-generated rows")
@@ -401,7 +419,7 @@ def _save_timesheet(entries, output_dir="data/timesheets", *, target_date, colle
         manifest = {"date": target_date, **collection_manifest,
             "calendar_context_count": len(context), "calendar_context_file": context_file.name if write_context else None,
             "unassigned_activity_count": len(unassigned), "activity_review_file": review_file.name if write_review else None,
-            "review": {"status": "required" if unassigned or any(e.get("calendar_overlap") for e in merged) else "none"}}
+            "review": {"status": "required" if unassigned or any(e.get("calendar_overlap") or e.get("time_basis") in ("scheduled", "estimated") for e in merged) else "none"}}
         contents[dir_path / f"{target_date}.collection.json"] = json.dumps(manifest, indent=2)
     if token_records:
         try:

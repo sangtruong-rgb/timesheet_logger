@@ -1,0 +1,32 @@
+{
+  "date": "2026-10-07",
+  "status": "demo",
+  "sources": {
+    "git": {
+      "status": "success",
+      "mode": "fixture",
+      "count": 1
+    },
+    "pull_requests": {
+      "status": "success",
+      "mode": "fixture",
+      "count": 2
+    },
+    "calendar": {
+      "status": "success",
+      "mode": "fixture",
+      "count": 2
+    }
+  },
+  "token_usage": {
+    "status": "synthetic_example",
+    "reason": "Example counts are fabricated demo metrics, not measured usage"
+  },
+  "calendar_context_count": 0,
+  "calendar_context_file": null,
+  "unassigned_activity_count": 0,
+  "activity_review_file": null,
+  "review": {
+    "status": "required"
+  }
+}

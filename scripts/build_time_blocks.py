@@ -332,7 +332,7 @@ def build_time_blocks(normalized_data: Dict[str, Any], *, unassigned_activity=No
     return blocks
 
 
-def main():
+def _main():
     parser = argparse.ArgumentParser(description="Build candidate time blocks and associate activities.")
     parser.add_argument("--normalized-file", "-i", type=str, required=True, help="Path to normalized activity JSON file")
     parser.add_argument("--output", "-o", type=str, default=None, help="Output time blocks JSON file")
@@ -354,6 +354,14 @@ def main():
         out_p.write_text(output_json, encoding="utf-8")
     else:
         print(output_json)
+
+
+def main():
+    try:
+        return _main()
+    except (OSError, ValueError) as exc:
+        print(f"Output/validation blocked ({type(exc).__name__}); review supplied inputs and output path.", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

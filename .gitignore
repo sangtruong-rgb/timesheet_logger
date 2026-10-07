@@ -33,3 +33,7 @@ data/audit/
 data/timesheets/demo/
 data/timesheets/drafts/
 data/raw/demo/
+
+# Local transactional storage metadata (never publish rollback contents)
+.timesheet.lock
+.timesheet-transaction.json

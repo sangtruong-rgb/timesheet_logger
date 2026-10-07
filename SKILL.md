@@ -1,81 +1,81 @@
 ---
 name: personal-timesheet
-description: Collects daily work activity from Git commits, Pull Requests, and Google Calendar, segments activities into structured time blocks, synthesizes concise topic descriptions with minimal AI, and saves idempotent timesheet entries.
-triggers:
-  - "log today's work"
-  - "log my work today"
-  - "create today's timesheet"
-  - "run my timesheet"
-  - "log my work for YYYY-MM-DD"
+description: Create a proposed daily timesheet from verified Git commits, GitHub PR actions and Google Calendar. Use for "log today's work", "run my timesheet", or "log my work for YYYY-MM-DD". Preserve evidence and mark scheduled attendance unconfirmed.
 ---
 
-# Personal Timesheet Logger
+# Personal timesheet
 
-## Purpose
-Automate personal daily timesheet logging by collecting verified activity from Git repositories, GitHub Pull Requests, and Google Calendar. GitLab PR support remains pending.
+Use scripts for collection, date/time math, matching, validation, suffixes, storage
+and token accounting. Use AI only to summarize the provided block text. Read
+[workflow.md](workflow.md) for policies and [README.md](README.md) for setup.
 
-Strictly follows the **[Script] vs [AI]** separation:
-- All deterministic data fetching, filtering, timezone handling, timestamp interval matching, PR deduplication, duration calculations, and file persistence are executed by Python scripts.
-- AI is solely invoked to perform semantic topic grouping and generate concise executive summaries from a minimal payload (< 350 tokens).
+Resolve the bundle through `${CLAUDE_SKILL_DIR}`, never the invoking project's
+working directory. Paths below are placeholders, not shell angle-bracket syntax.
+Use the configured Python environment with optional Calendar libraries. Never read,
+print or commit credentials/token contents. Do not edit Calendar or infer attendance.
 
-## When to Use
-Use this skill whenever the user asks to:
-- "log today's work"
-- "log my work today"
-- "create today's timesheet"
-- "run my timesheet"
-- "log my work for 2026-10-06" (or any specific date)
+1. Resolve target date from the request, or let scripts use today's configured IANA
+   timezone. Use an explicit profile with confirmed identities and selected repos.
+   Create an isolated run directory under `${CLAUDE_SKILL_DIR}/data/audit/` for audits.
+   Mark the skill run's aware start timestamp, session identity and usage message IDs
+   when available. Record accurate boundaries; do not guess transcript identities.
+2. Prepare with quoted absolute paths:
 
-## Workflow Reference
-The full ordered sequence and deterministic breakdown are specified in:
-[workflow.md](workflow.md)
-
-## Invocation Steps for Claude Code
-
-1. **Determine Target Date**:
-   Extract target date from the user prompt (`YYYY-MM-DD`). If none is specified, use today's date in the profile's IANA timezone. Load `config/user-config.json` when present, or pass an explicit `--config`; use all confirmed account/name/email aliases and the same repository selection for Git and PRs.
-   Every entry point uses CLI `--timezone` > profile `timezone` > `Asia/Ho_Chi_Minh`, independent of the host zone. Use a named IANA zone for historical DST dates. Keep the same `--config`/`--timezone` overrides in both phases and standalone Calendar/normalization/token commands. Invalid zones stop the run; never substitute the host timezone. Legacy fixed-offset daily models remain supported without rewriting old files.
-
-2. **Execute Deterministic Pipeline (Phase 1)**:
-   Run the orchestrator script to collect and prepare the minimal AI payload:
    ```bash
-   python3 scripts/run_pipeline.py --date <YYYY-MM-DD> --export-ai-input data/raw/ai_input_<YYYY-MM-DD>.json
-   ```
-   If the command returns exit code **2**, read the diagnostics and draft path printed by the pipeline. A failed source creates an **INCOMPLETE** draft; normalization, AI/block validation or daily reconciliation failures create a **REVIEW REQUIRED** draft. Normalization failures preserve raw evidence and do not write final timesheets, manifest, AI input or tokens. Report the reason and stop; do not read an older AI payload or claim that a final timesheet was generated. Never enable sample fixtures implicitly. Explicit fixture runs are **DEMO** and use isolated `demo/` output paths printed by the pipeline; use those paths for the remaining steps.
-
-3. **Read Minimal AI Input**:
-   Inspect `data/raw/ai_input_<YYYY-MM-DD>.json`.
-   The input object contains `blocks`, `unassigned_activity`, and `review`. Each item in `blocks` carries a stable `block_id` derived from date/start/end, plus `time_basis`, compact block times, actual calendar titles, commit messages, and PR titles. No git hashes, author info, or raw metadata are present. Copy the exact `block_id` when returning a summary. `unassigned_activity` is a separate compact review list: do not attach it to any block, summarize it as work inside a block, or infer duration from it. If `blocks` is empty, return `[]`; report the review evidence separately.
-
-4. **Perform AI Topic Synthesis**:
-   For each block that has commits or PRs:
-   - Group semantically related activities into 1–2 coherent topics.
-   - Write a concise, professional summary (e.g., *"Customer import improvements covering CSV validation, malformed-row handling, and tests"*).
-   - Return exactly one summary per selected `block_id`; copy IDs from the input without changing them. Output order does not matter. Calendar-only blocks can be omitted and use their own deterministic fallback.
-   - Do not append the `PRs:` suffix; the script assembles it from that block's evidence.
-   - Describe only supplied evidence. An `estimated` interval is a work-time proposal based on activity timestamps; do not claim continuous work for its whole duration. Calendar-only fallback repeats the event title without inventing discussion topics.
-   - `calendar_overlap: true` means conflicting scheduled events, with `attendance: unconfirmed`. Do not infer which event was attended or claim simultaneous attendance. Keep the attendance-review notice; the script also adds it independently of AI text.
-   - Return structured JSON in this format:
-     ```json
-     [
-       {
-         "block_id": "2026-10-06_09:30_12:00",
-         "description": "Customer import improvements covering CSV validation, malformed-row handling, and tests."
-       }
-     ]
-     ```
-   *(Save to `data/raw/ai_judgment_<YYYY-MM-DD>.json`)*
-   Unknown/stale IDs, duplicate summaries, inconsistent dates/intervals and malformed output are rejected. Position-only summaries are unsupported. Legacy `{date, block: {start, end}, description}` output requires an exact current match; date-less legacy intervals are accepted only for a single target day with unique candidate intervals.
-
-5. **Execute Final Assembly & Idempotent Save (Phase 2)**:
-   Pass the AI judgment back to the pipeline:
-   ```bash
-   python3 scripts/run_pipeline.py --date <YYYY-MM-DD> --ai-output data/raw/ai_judgment_<YYYY-MM-DD>.json
+   python3 "${CLAUDE_SKILL_DIR}/scripts/run_pipeline.py" --phase prepare \
+     --config "${CLAUDE_SKILL_DIR}/config/user-config.json" --date YYYY-MM-DD \
+     --snapshot "${CLAUDE_SKILL_DIR}/data/audit/RUN/activity.json" \
+     --export-ai-input "${CLAUDE_SKILL_DIR}/data/audit/RUN/ai-input.json" \
+     --output-dir "${CLAUDE_SKILL_DIR}/data/audit/RUN/timesheets"
    ```
 
-6. **Confirm to User**:
-   Display the generated timesheet summary from `data/timesheets/<YYYY-MM-DD>.md` and point to the audit JSON in `data/timesheets/<YYYY-MM-DD>.json`. Retain the scheduled/estimated labels and proposed-time notice. Scheduled Calendar time does not confirm attendance; estimated time is not measured work time.
-   If overlap is marked, report that source collection can be complete while attendance needs review. The saved output is a proposal; do not present it as confirmed meeting time. Attendance selection is a separate human review, not an AI decision.
-   Unmatched commits/PR actions appear under **Unassigned activity — review required** and in `<YYYY-MM-DD>.activity-review.json`, linked from the collection manifest. They contribute no duration. Source collection can be COMPLETE while assignment review is required; report both statuses. Do not turn a day containing only unmatched activity into an assumed workday. Breaktime/OT labels remain deferred.
-   Standalone token collection uses aware per-line timestamps in the selected timezone and skips missing/invalid/naive timestamps with diagnostics. A successful timesheet pipeline does not prove that actual run-scoped AI token usage was recorded; that integration remains F22. Do not report a missing timestamp or an empty initialized CSV as verified zero usage.
-   All-day context is shown below the Markdown rows and stored in `data/timesheets/<YYYY-MM-DD>.calendar-context.json` when present. It is not work duration or an automatic day-off decision and is excluded from AI block summaries. Timed events crossing midnight are shown only for the requested day, using `24:00` as its midnight end; preserve original source boundaries for audit.
+   Exit 2 means stop and report the source/validation/storage diagnostic and draft
+   path. Never use an older export after failure. Explicit fixtures are DEMO and
+   use isolated paths printed by scripts; never enable them for a live request.
+   PREPARED is not a completed final timesheet. Keep the snapshot's printed run ID.
+3. Read only the small AI export. Summarize `blocks`, at most one or two concise
+   sentences each. Do not summarize unassigned evidence into a block or invent work
+   duration, attendance or topics. Calendar-only blocks need no AI. Return a JSON
+   array of `{ "block_id": "...", "description": "..." }`. Omit PR numbers and
+   `PRs:`; scripts append the suffix. If no blocks need judgment, skip AI and omit
+   --ai-output. The Python CLI never calls an external AI service.
+4. Save the judgment array in RUN/ai-output.json, then assemble **the same snapshot**:
+
+   ```bash
+   python3 "${CLAUDE_SKILL_DIR}/scripts/run_pipeline.py" --phase assemble \
+     --snapshot "${CLAUDE_SKILL_DIR}/data/audit/RUN/activity.json" \
+     --ai-output "${CLAUDE_SKILL_DIR}/data/audit/RUN/ai-output.json" \
+     --output-dir "${CLAUDE_SKILL_DIR}/data/audit/RUN/timesheets"
+   ```
+
+   Do not collect again between phases. Changed evidence requires a new snapshot
+   path and new review. For normal logging use an explicit final output directory
+   under the bundle's data/timesheets instead of the audit directory.
+5. When actual usage is available, write an explicit manifest with the snapshot
+   run ID, session_file (or exact session_id), target_date, started_at, ended_at,
+   and optional message_ids. Bounds are [start,end). IDs are required if unrelated
+   work occurred inside that window. Pass --usage-run-manifest and --token-csv-path
+   during assembly for usage already available. To include later responses, record
+   the completed run afterward:
+
+   ```bash
+   python3 "${CLAUDE_SKILL_DIR}/scripts/collect_token_usage.py" \
+     --config "${CLAUDE_SKILL_DIR}/config/user-config.json" \
+     --run-manifest "${CLAUDE_SKILL_DIR}/data/audit/RUN/usage-run.json" \
+     --csv-path "${CLAUDE_SKILL_DIR}/data/audit/RUN/token-usage.csv"
+   ```
+
+   No transcript/boundary evidence means usage unknown, not zero. Selected-message
+   usage is labeled as selected scope; don't claim full-run totals. Manual counts
+   are cumulative per run and explicitly self-reported. Daily aggregation follows
+   the run's execution-start day; the timesheet date stays separate. Report input,
+   output, cache and total (including cache) separately from payload size.
+6. Report source states, collection COMPLETE/INCOMPLETE/DEMO, output paths, fallback
+   or AI summaries, and any unassigned/attendance review. Keep full-day future
+   meetings as proposals: **Theo lịch, chưa xác nhận tham dự**. Scheduled/estimated
+   minutes are not measured work. BREAK/OT and configurable schedule policy remain
+   deferred. Never silently erase manual edits or migrate ambiguous old rows.
+
+No automatic ticket clustering, judgment cache, daily scheduling or attendance
+confirmation is implemented. Reusing validated judgments with the same frozen
+snapshot is explicit. See data/README.md before inspecting historical demo files.
