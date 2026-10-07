@@ -115,7 +115,51 @@ still return a list. Pipeline runs always request envelopes from all three sourc
 - Successful live collection writes to `<output-dir>` and records all source metadata, identity aliases, repository selection, and timezone in `YYYY-MM-DD.collection.json`, even when sources are empty. Generated entry JSON also retains collection metadata; demo Markdown has a visible banner.
 - `normalize_activity.py --prs-file ... --calendar-file ...` accepts successful collector envelopes and legacy list fixtures, preserving envelope metadata. It rejects unsuccessful envelopes rather than treating them as empty sources.
 
-The default output directory is `data/timesheets`. Draft/demo isolation does not repair existing contaminated logs or changed-block rerun behavior; those remain separate audit items. Remote Git/API failures are explicit; local Git failure/invalid-path handling remains separate audit work. Google Calendar verification also remains pending.
+The default output directory is `data/timesheets`. Remote Git/API failures are explicit;
+local Git failure/invalid-path handling remains separate audit work. Primary Calendar
+read-only access has been verified on the configured machine for an empty day; packaged
+OAuth setup and real nonempty-event verification remain open.
+
+### Daily reruns and manual edits
+
+Each successful run replaces the **complete generated set for its target date**. Changed
+or deleted intervals disappear; an empty successful day writes `[]` and a zero-total
+Markdown table. Identical reruns leave JSON and Markdown bytes unchanged. Summary counts
+include inserted, updated, removed, preserved manual rows, and overridden candidates.
+
+Stored automatic rows carry `"provenance": {"kind": "generated", "generator": "timesheet_logger"}`.
+Before editing an automatic row by hand, explicitly change its provenance:
+
+- `{"kind": "manual"}`: keep this independent human row. Overlap with regenerated rows
+  blocks saving and requires review.
+- `{"kind": "override"}`: keep this human replacement and suppress the generated row
+  with the exact same `(date, start, end)`. If regenerated intervals change and overlap
+  it, saving is blocked until the conflict is reviewed.
+
+Legacy JSON without provenance is **not automatically migrated or erased**, even if it
+contains collection metadata. Back up the JSON/Markdown pair and classify a reviewed copy
+of every old row as generated/manual/override before rerunning against that directory.
+Use a fresh audit output directory while reviewing legacy logs; existing contaminated
+examples remain unchanged. Markdown is a rendered view; make edits in the audit JSON and
+mark their ownership explicitly.
+
+Legacy, invalid-store, and manual-overlap conflicts return exit **2**, preserve the previous
+timesheet, collection manifest, AI export, and token file, and write current evidence plus
+proposed entries under `drafts/`. Source metadata in such a draft can still be `complete`:
+collection succeeded, while `reconciliation.status` is `blocked`.
+
+Standalone saving now requires an explicit date and assertion of successful full-day
+collection, including when the input is empty:
+
+```bash
+python3 scripts/save_timesheet.py --entries-file entries.json \
+  --date 2026-10-06 --collection-status complete --output-dir data/audit/my-run
+```
+
+`--collection-status demo` isolates standalone output under `<output-dir>/demo/`.
+Do not pass a partial entry batch as a full-day snapshot. Source failures must remain
+INCOMPLETE drafts and never reach daily reconciliation. This storage fix does not repair
+overlapping generated events or estimated work-duration rules; those have separate audit items.
 
 #### Remote GitHub Repositories
 The Git collector (`scripts/get_git_activity.py`) supports uncloned remote GitHub repositories in addition to local directories:

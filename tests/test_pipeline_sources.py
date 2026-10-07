@@ -135,7 +135,8 @@ class TestPipelineSources(unittest.TestCase):
         self.assertEqual(manifest["status"], "complete")
         for source in manifest["sources"].values():
             self.assertEqual((source["mode"], source["status"], source["count"]), ("live", "success", 0))
-        self.assertFalse(self.final_json.exists())
+        self.assertEqual(json.loads(self.final_json.read_text()), [])
+        self.assertIn("**Total Tracked Time:** 0 mins", self.final_md.read_text())
         self.assertFalse((self.output / "demo").exists())
         self.assertFalse((self.output / "drafts").exists())
 
