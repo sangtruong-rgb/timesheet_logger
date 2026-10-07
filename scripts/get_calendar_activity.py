@@ -17,18 +17,18 @@ import json
 import os
 import sys
 from typing import List, Dict, Any, Optional
-from zoneinfo import ZoneInfo
+from activity_settings import add_timezone_arguments, timezone_settings, resolve_timezone
 
 from collection_result import (
     SourceUnavailable, collection_result, emit_result, load_fixture_records,
 )
 
 
-def get_local_timezone() -> datetime.timezone:
-    return datetime.datetime.now().astimezone().tzinfo or datetime.timezone.utc
+def get_local_timezone() -> datetime.tzinfo:
+    return timezone_settings()[1]
 
 
-def parse_event_time(val: Any, default_tz: datetime.timezone) -> Optional[datetime.datetime]:
+def parse_event_time(val: Any, default_tz: datetime.tzinfo) -> Optional[datetime.datetime]:
     """Parse Google API or raw string timestamp into timezone-aware datetime."""
     if isinstance(val, dict):
         date_str = val.get("dateTime") or val.get("date")
@@ -42,7 +42,17 @@ def parse_event_time(val: Any, default_tz: datetime.timezone) -> Optional[dateti
         if len(date_str) == 10:  # All-day event "YYYY-MM-DD"
             d = datetime.date.fromisoformat(date_str)
             return datetime.datetime(d.year, d.month, d.day, 0, 0, 0, tzinfo=default_tz)
-        return datetime.datetime.fromisoformat(date_str).astimezone(default_tz)
+        timestamp = datetime.datetime.fromisoformat(date_str)
+        if timestamp.tzinfo is None:
+            source_tz = resolve_timezone(val["timeZone"]) if isinstance(val, dict) and val.get("timeZone") else default_tz
+            # A local wall time during a DST gap/fold cannot safely imply an instant.
+            candidates = [timestamp.replace(tzinfo=source_tz, fold=fold) for fold in (0, 1)]
+            valid = [candidate for candidate in candidates
+                     if candidate.astimezone(datetime.timezone.utc).astimezone(source_tz).replace(tzinfo=None) == timestamp]
+            if not valid or len({candidate.utcoffset() for candidate in valid}) > 1:
+                raise ValueError("Calendar wall time requires an explicit offset at a DST transition")
+            timestamp = valid[0]
+        return timestamp.astimezone(default_tz)
     except Exception:
         return None
 
@@ -76,6 +86,7 @@ def fetch_google_calendar_events(
             calendarId="primary",
             timeMin=start_of_day,
             timeMax=end_of_day,
+            **({"timeZone": tz.key} if hasattr(tz, "key") else {}),
             singleEvents=True,
             orderBy="startTime"
         ).execute()
@@ -147,7 +158,7 @@ def collect_calendar_activity(target_date, fixture_path=None, tz=None):
 
 def main():
     parser = argparse.ArgumentParser(description="Collect Google Calendar events for a specific date.")
-    parser.add_argument("--timezone", help="IANA timezone shared with Git and PR collection")
+    add_timezone_arguments(parser)
     parser.add_argument(
         "--date",
         type=str,
@@ -171,8 +182,8 @@ def main():
     args = parser.parse_args()
 
     try:
-        tz = ZoneInfo(args.timezone) if args.timezone else get_local_timezone()
-    except (KeyError, ValueError) as exc:
+        _, tz = timezone_settings(args.config, args.timezone)
+    except (KeyError, ValueError, OSError) as exc:
         parser.error(str(exc))
     if args.date:
         try:

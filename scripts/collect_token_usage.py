@@ -22,10 +22,11 @@ import os
 import sys
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
+from activity_settings import add_timezone_arguments, timezone_settings, day_bounds, parse_timestamp
 
 
-def get_local_date_str() -> str:
-    return datetime.datetime.now().astimezone().date().isoformat()
+def get_local_date_str(tz=None) -> str:
+    return datetime.datetime.now(tz or timezone_settings()[1]).date().isoformat()
 
 
 def parse_transcript_line_usage(line_obj: Dict[str, Any]) -> Tuple[int, int, int]:
@@ -53,17 +54,15 @@ def parse_transcript_line_usage(line_obj: Dict[str, Any]) -> Tuple[int, int, int
     return inp, out, cache
 
 
-def parse_session_file(file_path: Path, target_date_str: str) -> Optional[Dict[str, Any]]:
-    """Parse a single JSONL session file."""
+def parse_session_file(file_path: Path, target_date_str: str, tz=None) -> Optional[Dict[str, Any]]:
+    """Filter timestamped usage lines by the configured local day, never file mtime."""
     try:
-        mtime = datetime.datetime.fromtimestamp(file_path.stat().st_mtime).astimezone().date().isoformat()
-        if mtime != target_date_str:
-            # Check if internal timestamp matches date
-            pass
-
+        tz = tz or timezone_settings()[1]
+        start, end = day_bounds(datetime.date.fromisoformat(target_date_str), tz)
         session_id = file_path.stem
         total_inp, total_out, total_cache = 0, 0, 0
         has_usage = False
+        skipped_timestamps = 0
 
         with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
             for line in f:
@@ -74,12 +73,22 @@ def parse_session_file(file_path: Path, target_date_str: str) -> Optional[Dict[s
                     obj = json.loads(line_str)
                     i, o, c = parse_transcript_line_usage(obj)
                     if i or o or c:
+                        try:
+                            timestamp = parse_timestamp(obj.get("timestamp"))
+                        except (ValueError, TypeError):
+                            skipped_timestamps += 1
+                            continue
+                        if not start <= timestamp < end:
+                            continue
                         total_inp += i
                         total_out += o
                         total_cache += c
                         has_usage = True
                 except json.JSONDecodeError:
                     continue
+
+        if skipped_timestamps:
+            print(f"Warning: {file_path.name}: skipped {skipped_timestamps} usage line(s) without a valid aware timestamp; not assigned to a day.", file=sys.stderr)
 
         if has_usage:
             return {
@@ -89,7 +98,7 @@ def parse_session_file(file_path: Path, target_date_str: str) -> Optional[Dict[s
                 "output_tokens": total_out,
                 "cache_tokens": total_cache,
                 "total_tokens": total_inp + total_out + total_cache,
-                "notes": f"Scanned from {file_path.name}"
+                "notes": f"Scanned from {file_path.name}; timezone={getattr(tz, 'key', str(tz))}"
             }
     except Exception as e:
         print(f"Warning: Failed reading {file_path}: {e}", file=sys.stderr)
@@ -136,6 +145,7 @@ def update_csv(csv_path: Path, new_records: List[Dict[str, Any]]):
 
 def main():
     parser = argparse.ArgumentParser(description="Collect and record Claude token usage.")
+    add_timezone_arguments(parser)
     parser.add_argument("--date", type=str, default=None, help="Target date YYYY-MM-DD (default: today)")
     parser.add_argument("--claude-dir", type=str, default=os.path.expanduser("~/.claude"), help="Path to Claude root dir")
     parser.add_argument("--session-file", type=str, default=None, help="Direct path to session JSONL file")
@@ -145,7 +155,12 @@ def main():
 
     args = parser.parse_args()
 
-    target_date = args.date or get_local_date_str()
+    try:
+        zone_name, tz = timezone_settings(args.config, args.timezone)
+        target_date = args.date or get_local_date_str(tz)
+        datetime.date.fromisoformat(target_date)
+    except (ValueError, OSError) as exc:
+        parser.error(str(exc))
     csv_file = Path(args.csv_path)
 
     records = []
@@ -163,11 +178,11 @@ def main():
             "output_tokens": o_val,
             "cache_tokens": c_val,
             "total_tokens": i_val + o_val + c_val,
-            "notes": "Direct run recording"
+            "notes": f"Direct run recording; timezone={zone_name}"
         })
     # Case 2: Specific session file
     elif args.session_file:
-        res = parse_session_file(Path(args.session_file), target_date)
+        res = parse_session_file(Path(args.session_file), target_date, tz)
         if res:
             records.append(res)
     # Case 3: Scan claude directory
@@ -175,7 +190,7 @@ def main():
         claude_path = Path(args.claude_dir)
         files = find_transcripts(claude_path)
         for f in files:
-            res = parse_session_file(f, target_date)
+            res = parse_session_file(f, target_date, tz)
             if res:
                 records.append(res)
 
@@ -187,7 +202,7 @@ def main():
         # Check if CSV exists, if not initialize it with header
         if not csv_file.exists():
             update_csv(csv_file, [])
-        print(f"No active session transcript found under {args.claude_dir} for date {target_date}. CSV initialized.")
+        print(f"No timestamped usage matched {target_date} in {zone_name}. CSV exists or was initialized; this does not establish zero usage.")
 
 
 if __name__ == "__main__":
