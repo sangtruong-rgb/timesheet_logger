@@ -74,7 +74,13 @@ def render_markdown(date_str: str, items: List[Dict[str, Any]], collection_statu
     if collection_status == "demo" or any(item.get("collection", {}).get("status") == "demo" for item in items):
         lines[4:4] = ["> DEMO: contains explicitly selected fixture data; not a live work record.", ""]
 
+    has_estimates = any(item.get("time_basis") == "estimated" for item in items)
+    if has_estimates:
+        lines[4:4] = ["> Estimated intervals are proposals based on activity timestamps, not measured work time.", ""]
+
     total_minutes = 0
+    scheduled_minutes = 0
+    estimated_minutes = 0
     for it in items:
         e = it.get("entry", {})
         s = it.get("sources", {})
@@ -82,6 +88,12 @@ def render_markdown(date_str: str, items: List[Dict[str, Any]], collection_statu
         end = e.get("end", "")
         dur = e.get("duration_minutes", 0)
         total_minutes += dur
+        basis = it.get("time_basis")
+        if basis == "scheduled":
+            scheduled_minutes += dur
+        elif basis == "estimated":
+            estimated_minutes += dur
+        duration_text = f"{dur}m" + (f" ({basis})" if basis in ("scheduled", "estimated") else "")
         desc = e.get("description", "").replace("\n", " ").replace("|", "\\|")
 
         src_parts = []
@@ -98,12 +110,16 @@ def render_markdown(date_str: str, items: List[Dict[str, Any]], collection_statu
             src_parts.append(f"PRs: {', '.join(pr_tags)}")
 
         evidence_str = "; ".join(src_parts) if src_parts else "Manual"
-        lines.append(f"| {start} – {end} | {dur}m | {desc} | {evidence_str} |")
+        lines.append(f"| {start} – {end} | {duration_text} | {desc} | {evidence_str} |")
 
     hours = total_minutes // 60
     mins = total_minutes % 60
     lines.append("")
-    lines.append(f"**Total Tracked Time:** {total_minutes} mins ({hours}h {mins:02d}m)")
+    total_label = "Total Proposed Time" if has_estimates else "Total Tracked Time"
+    lines.append(f"**{total_label}:** {total_minutes} mins ({hours}h {mins:02d}m)")
+    if any(item.get("time_basis") in ("scheduled", "estimated") for item in items):
+        lines.append(f"Scheduled Calendar: {scheduled_minutes} mins; estimated development: {estimated_minutes} mins; "
+                     f"manual/unclassified: {total_minutes - scheduled_minutes - estimated_minutes} mins.")
     lines.append("")
     return "\n".join(lines)
 

@@ -189,6 +189,25 @@ whether the underlying sources changed since an earlier payload. A frozen snapsh
 between preparation and final assembly remains F28. The CLI reads supplied AI JSON;
 it does not invoke an external model itself.
 
+### Scheduled and estimated intervals
+
+Calendar events retain their actual titles and carry `time_basis: scheduled`.
+This records scheduled time, not confirmed attendance. Calendar-only fallback
+descriptions repeat supplied titles without inventing meeting topics.
+
+A development gap is retained only when a commit or PR action has an aware
+timestamp inside `[start, end)`. These rows carry `time_basis: estimated` and
+`estimation_reason: calendar_gap_with_activity`; timestamps establish activity,
+not continuous work throughout the interval. Successful empty Calendar results
+with Git/PR activity still use the existing workday-window proposal, marked
+`activity_workday_window`. An entirely empty day creates no rows.
+
+Estimated rows have no synthetic Calendar titles. AI input includes `time_basis`,
+and Markdown labels each interval, separates scheduled/estimated totals, and
+calls a total containing estimates **Total Proposed Time**. Workday-window policy,
+lunch handling, Calendar overlaps, all-day/cross-midnight events, and unmatched
+activity routing remain separate audit work (D02, F05–F08).
+
 #### Remote GitHub Repositories
 The Git collector (`scripts/get_git_activity.py`) supports uncloned remote GitHub repositories in addition to local directories:
 - **Bare slug**: `--repos owner/repo`
@@ -205,8 +224,8 @@ and retrieves submitted reviews and merge details through REST endpoints. It doe
 or submitted a review before that merge. Pending reviews are excluded. References retain
 full `owner/repo`; each reference has an `events` array with action, actor, and local timestamp.
 Opening/review/merge actions survive normalization and are associated with their own blocks;
-references are deduplicated within each block. Existing general block/time estimation bugs
-remain under F02–F08.
+references are deduplicated within each block. Remaining block/time issues are
+tracked under F05–F08 and D02.
 
 Collectors use a half-open local day `[00:00, next-day 00:00)` in the configured IANA timezone.
 For `2026-10-06` in Vietnam, that is `2026-10-05T17:00:00Z` through, but excluding,

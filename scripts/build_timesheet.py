@@ -57,13 +57,9 @@ def synthesize_deterministic_summary(block: Dict[str, Any]) -> str:
     prs = block.get("prs", [])
 
     # Pure meeting block
-    if cal_titles and not commits and not prs:
-        title = cal_titles[0]
-        if "stand-up" in title.lower() or "standup" in title.lower():
-            return f"{title} discussing daily sprint goals and blockers."
-        elif "meeting" in title.lower() or "planning" in title.lower() or "review" in title.lower():
-            return f"{title} addressing project scope and alignment."
-        return f"{title}."
+    if not commits and not prs and (cal_titles or block.get("time_basis") == "scheduled"):
+        text = "; ".join(cal_titles).strip() or "Calendar event"
+        return text if text.endswith((".", "!", "?")) else f"{text}."
 
     # Block with commits / PRs
     summary_parts = []
@@ -188,6 +184,8 @@ def build_entries(
         entry_record = {
             "block_id": key,
             "summary_source": "ai" if ai_match else "fallback",
+            **({"time_basis": b["time_basis"]} if "time_basis" in b else {}),
+            **({"estimation_reason": b["estimation_reason"]} if "estimation_reason" in b else {}),
             "entry": {
                 "date": date_str,
                 "start": start_time,
