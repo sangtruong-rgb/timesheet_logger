@@ -2,6 +2,7 @@
 
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -117,7 +118,9 @@ class TestPipelineSources(unittest.TestCase):
         binary = self.cwd / "bin"
         binary.mkdir()
         gh = binary / "gh"
-        gh.write_text(f"#!{sys.executable}\nimport sys\nif sys.argv[1] == 'api': print('[]')\n")
+        gh_program = gh.with_suffix(".py")
+        gh_program.write_text("import sys\nif sys.argv[1] == 'api': print('[]')\n")
+        gh.write_text(f'#!/bin/sh\nexec {shlex.quote(sys.executable)} {shlex.quote(str(gh_program))} "$@"\n')
         gh.chmod(0o755)
         # Set an explicit remote slug only for this empty-live-source test.
         self.config.write_text(json.dumps({"author": {"names": ["Test User"]}, "github": {"users": ["test-user"]}, "timezone": "Asia/Ho_Chi_Minh"}))

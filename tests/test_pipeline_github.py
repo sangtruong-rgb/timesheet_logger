@@ -1,6 +1,7 @@
 """Subprocess integration: one profile governs Git and PR identity/repo/date."""
 import json
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -28,7 +29,8 @@ class TestGitHubPipeline(unittest.TestCase):
         binary = self.directory / 'bin'
         binary.mkdir()
         cli = binary / 'gh'
-        cli.write_text(f'#!{sys.executable}\n' + '''import json, os, sys
+        cli_program = cli.with_suffix('.py')
+        cli_program.write_text('''import json, os, sys
 if sys.argv[1] == 'auth': sys.exit(0)
 endpoint = sys.argv[4]
 with open(os.environ['REQUEST_LOG'], 'a') as log: log.write(endpoint+'\\n')
@@ -46,6 +48,7 @@ elif '/pulls?' in endpoint:
     print(json.dumps([pull(1, 'account-one'), pull(2, 'account-two'), pull(3, 'outsider')]))
 else: sys.exit(1)
 ''')
+        cli.write_text(f'#!/bin/sh\nexec {shlex.quote(sys.executable)} {shlex.quote(str(cli_program))} "$@"\n')
         cli.chmod(0o755)
         self.requests = self.directory / 'requests.txt'
         self.env = dict(os.environ, PATH=str(binary)+os.pathsep+'/usr/bin:/bin', TZ='UTC', REQUEST_LOG=str(self.requests))
