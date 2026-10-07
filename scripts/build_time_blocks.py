@@ -7,6 +7,8 @@ Rules:
    - Calendar events define explicit blocks (meetings, stand-ups, focus time).
    - Development gaps require a timestamped commit/PR inside their interval.
      These durations are estimated, not proof of continuous work.
+   - All development gaps exclude 12:00–13:30 before checking activity.
+     Scheduled Calendar events during lunch are retained.
 2. When NO calendar events exist (deterministic fallback):
    - Inspect commit and PR timestamps.
    - If activity exists only in morning (< 12:30): block is 09:00–12:30.
@@ -107,58 +109,33 @@ def build_time_blocks(normalized_data: Dict[str, Any]) -> List[Dict[str, Any]]:
         timeline: List[Dict[str, Any]] = []
         cur_cursor = day_start
 
+        def append_development_gap(start, end):
+            # Subtract lunch first, then apply the existing 30-minute minimum
+            # to each remaining interval. Activity is checked per interval below.
+            for gap_start, gap_end in ((start, min(end, lunch_start)),
+                                       (max(start, lunch_end), end)):
+                if (gap_end - gap_start).total_seconds() >= 1800:
+                    timeline.append({
+                        "type": "development",
+                        "start": gap_start,
+                        "end": gap_end
+                    })
+
         for seg in segments:
             seg_start = seg["start"]
             seg_end = seg["end"]
 
             # If there's a gap between cur_cursor and seg_start
             if seg_start > cur_cursor:
-                # Check if gap intersects lunch
-                gap_start = cur_cursor
-                gap_end = seg_start
-
-                # If gap spans across lunch, split around lunch
-                if gap_start < lunch_start and gap_end > lunch_end:
-                    if (lunch_start - gap_start).total_seconds() >= 1800:
-                        timeline.append({
-                            "type": "development",
-                            "title": "Development",
-                            "start": gap_start,
-                            "end": lunch_start
-                        })
-                    if (gap_end - lunch_end).total_seconds() >= 1800:
-                        timeline.append({
-                            "type": "development",
-                            "title": "Development",
-                            "start": lunch_end,
-                            "end": gap_end
-                        })
-                elif not (gap_start >= lunch_start and gap_end <= lunch_end):
-                    # Gap is not purely lunch
-                    if (gap_end - gap_start).total_seconds() >= 1800:
-                        # Exclude lunch if overlaps
-                        actual_start = max(gap_start, lunch_end) if gap_start >= lunch_start and gap_start < lunch_end else gap_start
-                        actual_end = min(gap_end, lunch_start) if gap_end > lunch_start and gap_end <= lunch_end else gap_end
-                        if actual_end > actual_start and (actual_end - actual_start).total_seconds() >= 1800:
-                            timeline.append({
-                                "type": "development",
-                                "title": "Development",
-                                "start": actual_start,
-                                "end": actual_end
-                            })
+                append_development_gap(cur_cursor, seg_start)
 
             timeline.append(seg)
             if seg_end > cur_cursor:
                 cur_cursor = seg_end
 
         # Check gap between last event and day_end
-        if cur_cursor < day_end and (day_end - cur_cursor).total_seconds() >= 1800:
-            timeline.append({
-                "type": "development",
-                "title": "Development",
-                "start": cur_cursor,
-                "end": day_end
-            })
+        if cur_cursor < day_end:
+            append_development_gap(cur_cursor, day_end)
 
         # Build blocks from timeline
         for item in timeline:

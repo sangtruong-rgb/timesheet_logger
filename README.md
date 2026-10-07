@@ -204,9 +204,17 @@ with Git/PR activity still use the existing workday-window proposal, marked
 
 Estimated rows have no synthetic Calendar titles. AI input includes `time_basis`,
 and Markdown labels each interval, separates scheduled/estimated totals, and
-calls a total containing estimates **Total Proposed Time**. Workday-window policy,
-lunch handling, Calendar overlaps, all-day/cross-midnight events, and unmatched
-activity routing remain separate audit work (D02, F05–F08).
+calls a total containing estimates **Total Proposed Time**.
+
+All development gaps before, between, and after Calendar events subtract the
+current lunch interval `12:00–13:30` before applying the 30-minute minimum and
+checking activity independently in each remaining interval. Scheduled Calendar
+events overlapping lunch are retained whole. Lunch-only commit/PR evidence is
+preserved through the existing unmatched-activity fallback, whose routing remains
+F08. Lunch times are currently hardcoded; reading configurable workday settings
+remains D02. No-Calendar fallback is unchanged, including its morning-only
+`09:00–12:30` proposal; that inconsistency remains D02. Calendar overlaps and
+all-day/cross-midnight handling remain F06/F07.
 
 #### Remote GitHub Repositories
 The Git collector (`scripts/get_git_activity.py`) supports uncloned remote GitHub repositories in addition to local directories:
