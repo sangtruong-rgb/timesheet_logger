@@ -1,6 +1,6 @@
 # R04 — explicit usage schema and incomplete evidence
 
-The collector accepts `complete_usage_snapshot_v1`: a timestamped JSONL snapshot
+The Claude adapter accepts `complete_usage_snapshot_v1`: a timestamped JSONL snapshot
 with all four counts explicitly present. It does not infer missing values:
 
 | Component | Canonical field | Supported alias |
@@ -49,3 +49,7 @@ pipeline preservation tests run real Python subprocesses with actual OS
 `CLAUDE_DIR` and `TIMESHEET_TOKEN_CSV`, isolated files and no environment/API mocks.
 These tests do not establish actual Claude token usage. F25/V01 acceptance still
 requires an explicitly attributed real Claude Code run and its transcript.
+
+Codex uses a separate `codex_exec_run_v1` adapter with provider-specific cache
+semantics and a verified complete CLI invocation. See [Codex usage](codex-usage.md).
+It does not relax the Claude schema or infer missing Claude cache fields.

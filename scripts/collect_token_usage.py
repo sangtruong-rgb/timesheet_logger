@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Attributed run usage. Never implicitly scan or charge unrelated Claude sessions."""
+"""Attributed Claude/Codex run usage; never implicitly charge unrelated sessions."""
 import argparse
 import csv
 import datetime
@@ -138,11 +138,17 @@ def find_transcripts(base_dir):
     return sorted(Path(base_dir).rglob('*.jsonl')) if Path(base_dir).exists() else []
 
 
-def collect_run(manifest_path, tz, *, expected_target=None, expected_run=None, claude_dir=None):
+def collect_run(manifest_path, tz, *, expected_target=None, expected_run=None, claude_dir=None, expected_ai_output=None):
     location = Path(manifest_path)
     try:
         manifest = json.loads(location.read_text(encoding='utf-8'))
         if not isinstance(manifest, dict): raise ValueError('Run manifest must be an object')
+        provider = manifest.get('provider', 'claude')
+        if provider == 'codex':
+            from codex_usage import collect_codex_run
+            return collect_codex_run(location, manifest, tz, expected_target=expected_target,
+                expected_run=expected_run, expected_ai_output=expected_ai_output)
+        if provider != 'claude': raise ValueError('Unsupported token provider')
         run_id = manifest.get('run_id'); target = manifest.get('target_date')
         if not isinstance(run_id, str) or not run_id.strip() or '/' in run_id: raise ValueError('run_id must be a nonempty identifier without /')
         if datetime.date.fromisoformat(target).isoformat() != target: raise ValueError('Invalid target_date')
@@ -222,7 +228,7 @@ def update_csv(csv_path, new_records):
 
 def daily_totals(csv_path, date):
     """Separate measured transcripts from self-reported totals; exclude legacy/synthetic rows."""
-    categories = {name: {key: 0 for key in FIELDS[2:6]} for name in ("transcript", "self_reported")}
+    categories = {name: {key: 0 for key in FIELDS[2:6]} for name in ("transcript", "codex_exec", "self_reported")}
     with Path(csv_path).open(encoding="utf-8", newline="") as stream:
         for raw in csv.DictReader(stream):
             row = validated_record(raw)
@@ -236,7 +242,7 @@ def daily_totals(csv_path, date):
 
 
 def main():
-    parser=argparse.ArgumentParser(description='Record explicitly attributed Claude run usage.')
+    parser=argparse.ArgumentParser(description='Record explicitly attributed Claude or Codex run usage.')
     add_timezone_arguments(parser)
     parser.add_argument('--date',help='Execution date for a manual record')
     parser.add_argument('--target-date',help='Timesheet target date, distinct from execution date')
