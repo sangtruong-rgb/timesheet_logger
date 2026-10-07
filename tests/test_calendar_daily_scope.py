@@ -147,7 +147,9 @@ class TestCalendarDailyScope(unittest.TestCase):
         item=timed('2026-10-07T15:00:00Z','2026-10-07T19:00:00Z')
         blocks=build_time_blocks(daily([item]))
         self.assertEqual((blocks[0]['start_time'],blocks[0]['end_time'],blocks[0]['duration_minutes']),('22:00','24:00',120))
-        self.assertEqual(blocks[0]['calendar_events'],[item])
+        self.assertEqual(blocks[0]['calendar_events'],[{**item,
+            'start':'2026-10-07T22:00:00+07:00', 'end':'2026-10-08T02:00:00+07:00',
+            'original_start':item['start'], 'original_end':item['end']}])
         self.assertEqual(build_time_blocks(daily([item],timezone='+07:00')),blocks)
 
     def test_cross_midnight_overlap_remains_disjoint_and_requires_review(self):

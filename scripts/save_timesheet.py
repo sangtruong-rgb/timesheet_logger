@@ -148,6 +148,8 @@ def render_markdown(date_str: str, items: List[Dict[str, Any]], collection_statu
             activity = record["activity"]
             identity = (f"Commit {activity.get('hash', '(unknown)')}: {activity.get('message', '')}"
                         if record["source"] == "git" else
+                        f"Calendar: {activity['title']} ({activity['start']} to {activity['end']})"
+                        if record["source"] == "google_calendar" else
                         f"PR #{activity['id']} ({activity.get('repository', '')}), {activity.get('status', '')}: {activity.get('title', '')}")
             timestamp = activity.get("timestamp") or "(missing)"
             lines.append(f"- {identity} — {timestamp}; {REASONS[record['reason']]}.".replace("\n", " "))

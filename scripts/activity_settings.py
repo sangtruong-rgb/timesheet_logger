@@ -111,6 +111,14 @@ def day_bounds(date, timezone):
     return start.astimezone(datetime.timezone.utc), end.astimezone(datetime.timezone.utc)
 
 
+def timestamp_sort_key(value):
+    """Chronological aware sorting; invalid evidence remains deterministic for review."""
+    try:
+        return (0, parse_timestamp(value).astimezone(datetime.timezone.utc))
+    except (ValueError, TypeError, OverflowError):
+        return (1, str(value))
+
+
 def identity_match(commit, identity):
     """A known foreign GitHub login must not match a same-name fallback alias."""
     folded = {key: {x.casefold() for x in identity.get(key, [])} for key in ("github_users", "names", "emails")}

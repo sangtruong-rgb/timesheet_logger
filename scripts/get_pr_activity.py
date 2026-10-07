@@ -6,7 +6,7 @@ import datetime
 from typing import List, Dict, Any
 
 from activity_settings import (add_settings_arguments, day_bounds, github_repo,
-                               parse_timestamp, settings_from_args, timezone_settings)
+                               parse_timestamp, settings_from_args, timezone_settings, timestamp_sort_key)
 from collection_result import (SourceUnavailable, collection_result, emit_result,
                                load_fixture_records)
 from github_api import GitHubAPI, GitHubAPIError
@@ -39,7 +39,7 @@ def deduplicate_prs(raw_prs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             if event not in record["events"]:
                 record["events"].append(dict(event))
     for record in references.values():
-        record["events"].sort(key=lambda event: (event["timestamp"], event["action"], str(event.get("id", ""))))
+        record["events"].sort(key=lambda event: (timestamp_sort_key(event.get("timestamp")), event["action"], str(event.get("id", ""))))
     return sorted(references.values(), key=lambda pr: (pr.get("repository", ""), str(pr["id"])))
 
 

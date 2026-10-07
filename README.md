@@ -255,6 +255,27 @@ Lunch times are currently hardcoded; reading configurable workday settings remai
 D02. The no-Calendar morning-only `09:00–12:30` proposal remains D02; candidate
 windows are now retained only when an aware timestamp actually falls inside them.
 
+### Validated daily normalization
+
+Normalization validates source arrays, record types, commit/PR identities and
+Calendar intervals before producing a daily model. Aware timestamps are converted
+to the selected timezone and sorted by their UTC instant. Changed representations
+retain `original_timestamp`, `original_start` or `original_end` for audit.
+The local day uses `[midnight, next midnight)`; intersecting Calendar events keep
+their full extent until block construction clips it.
+
+Missing, invalid, naive or other-day commit/PR timestamps go to
+`unassigned_activity`, retaining each action without adding work duration.
+Other-day Calendar events also remain review evidence. Malformed structure,
+conflicting qualified commit records, or invalid/nonpositive Calendar intervals
+block normalization: exit 2, raw evidence in `drafts/`, and no final timesheet,
+manifest, AI input or token writes. Successful source collection can coexist with
+blocked normalization; it does not imply a completed timesheet.
+Standalone normalization rejects unreadable explicitly supplied files and preserves
+existing output. Omitted optional source files retain the legacy empty-list behavior.
+This validation is scoped to incoming activity; full storage schema hardening and
+concurrent multi-file transactions remain separate findings.
+
 ### Activity without a matching interval
 
 Commits and each PR action are assigned only by aware timestamp within `[start,end)`

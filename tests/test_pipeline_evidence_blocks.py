@@ -204,7 +204,7 @@ class TestPipelineEvidenceBlocks(unittest.TestCase):
             self.assertEqual(path.read_bytes(), content)
         draft = json.loads((self.output / "drafts" / f"{DATE}.json").read_text())
         self.assertEqual(draft["activity"]["calendar"][0]["title"], "Invalid bounds")
-        self.assertEqual(draft["ai_validation"]["status"], "error")
+        self.assertEqual(draft["normalization"]["status"], "blocked")
 
     def test_all_day_only_pipeline_saves_context_and_zero_work_time(self):
         context = {"title": "Deadline", "start": DATE, "end": "2026-10-07", "all_day": True}
@@ -293,15 +293,15 @@ class TestPipelineEvidenceBlocks(unittest.TestCase):
         for path, content in before.items():
             self.assertEqual(path.read_bytes(), content)
 
-    def test_wrong_day_context_blocks_pipeline_and_keeps_current_context(self):
+    def test_wrong_day_context_is_quarantined_and_removed_from_current_context(self):
         context = {"title": "Deadline", "start": DATE, "end": "2026-10-07", "all_day": True}
         self.assertEqual(self.pipeline([context]), 0)
-        before = self.snapshot()
         path = self.output / f"{DATE}.calendar-context.json"
-        before[path] = path.read_bytes()
-        self.assertEqual(self.pipeline([{**context, "start": "2026-10-07", "end": "2026-10-08"}]), 2)
-        for path, content in before.items():
-            self.assertEqual(path.read_bytes(), content)
+        self.assertEqual(self.pipeline([{**context, "start": "2026-10-07", "end": "2026-10-08"}]), 0)
+        self.assertEqual(json.loads(path.read_text())["calendar_context"], [])
+        review = json.loads((self.output / f"{DATE}.activity-review.json").read_text())
+        self.assertEqual(review["unassigned_activity"][0]["source"], "google_calendar")
+        self.assertEqual(review["unassigned_activity"][0]["reason"], "outside_target_day")
 
 
 if __name__ == "__main__":
