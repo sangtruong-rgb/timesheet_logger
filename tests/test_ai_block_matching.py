@@ -60,9 +60,9 @@ class TestAIBlockMatching(unittest.TestCase):
 
     def test_payload_id_round_trip_preserves_evidence_without_sending_commit_hashes(self):
         payload = prepare_all_blocks(self.blocks)
-        self.assertEqual([p["block_id"] for p in payload], [MEETING_ID, WORK_ID])
+        self.assertEqual([p["block_id"] for p in payload], [WORK_ID])
         self.assertNotIn("audit-sha", json.dumps(payload))
-        self.assert_sparse_correct([{"block_id": payload[1]["block_id"], "description": "AI payment summary"}])
+        self.assert_sparse_correct([{"block_id": payload[0]["block_id"], "description": "AI payment summary"}])
 
     def test_same_clock_interval_on_two_days_has_distinct_id_matches(self):
         tomorrow = copy.deepcopy(self.blocks[1]); tomorrow["date"] = "2026-10-07"

@@ -18,6 +18,7 @@ import sys
 from pathlib import Path
 from typing import List, Dict, Any, Tuple
 from activity_review import REASONS, validate_unassigned_activity, unpack_activity_snapshot
+from atomic_storage import StorageError, directory_lock, write_bundle
 
 
 class TimesheetReconciliationError(ValueError):
@@ -194,6 +195,15 @@ def entry_interval(item, target_date):
             or not isinstance(entry.get("description"), str)
             or not isinstance(item.get("sources", {}), dict)):
         raise TimesheetReconciliationError("Invalid duration, description, or sources in timesheet row")
+    try:
+        from interval_validation import validate_interval
+        validate_interval(target_date, entry["start"], entry["end"], duration, item.get("interval"))
+    except ValueError as exc:
+        raise TimesheetReconciliationError(str(exc)) from exc
+    for field in ("commits", "pull_requests", "calendar_events", "calendar"):
+        values = item.get("sources", {}).get(field, [])
+        if not isinstance(values, list) or any(not isinstance(v, str if field == "calendar" else dict) for v in values):
+            raise TimesheetReconciliationError("Invalid source evidence arrays in stored/incoming row")
     return start, end
 
 
@@ -228,6 +238,12 @@ def reconcile_daily_entries(existing, incoming, target_date, collection_status):
         metadata = item.get("collection", {})
         if not isinstance(metadata, dict) or metadata.get("status", collection_status) != collection_status:
             raise TimesheetReconciliationError("Incoming row collection status does not match the successful snapshot")
+        if item["entry"]["description"].count("PRs:") != 1:
+            raise TimesheetReconciliationError("Generated descriptions require exactly one script-owned PRs suffix")
+        for field in ("commits", "pull_requests", "calendar_events", "calendar"):
+            values = item.get("sources", {}).get(field, [])
+            if not isinstance(values, list) or any(not isinstance(v, str if field == "calendar" else dict) for v in values):
+                raise TimesheetReconciliationError("Invalid generated source evidence arrays")
         provenance = item.get("provenance")
         if provenance is not None and provenance != {"kind": "generated", "generator": "timesheet_logger"}:
             raise TimesheetReconciliationError("Incoming snapshots may only contain pipeline-generated rows")
@@ -285,7 +301,18 @@ def validate_calendar_context(context, target_date):
 
 
 def save_timesheet(entries, output_dir="data/timesheets", *, target_date, collection_status, calendar_context=None,
-                   unassigned_activity=None):
+                   unassigned_activity=None, collection_manifest=None, extra_files=None):
+    try:
+        with directory_lock(output_dir, extra_paths=(extra_files or {})):
+            return _save_timesheet(entries, output_dir, target_date=target_date, collection_status=collection_status,
+                calendar_context=calendar_context, unassigned_activity=unassigned_activity,
+                collection_manifest=collection_manifest, extra_files=extra_files)
+    except (StorageError, OSError) as exc:
+        raise TimesheetReconciliationError(str(exc)) from exc
+
+
+def _save_timesheet(entries, output_dir="data/timesheets", *, target_date, collection_status, calendar_context=None,
+                   unassigned_activity=None, collection_manifest=None, extra_files=None):
     """Persist exactly one successful daily snapshot; [] explicitly clears generated rows."""
     try:
         if datetime.date.fromisoformat(target_date).isoformat() != target_date:
@@ -349,15 +376,26 @@ def save_timesheet(entries, output_dir="data/timesheets", *, target_date, collec
     json_content = json.dumps(merged, indent=2)
     context_content = json.dumps(context_record, indent=2)
     md_content = render_markdown(target_date, merged, collection_status, context, unassigned)
-    dir_path.mkdir(parents=True, exist_ok=True)
+    reserved = {json_file.resolve(), md_file.resolve(), context_file.resolve(), review_file.resolve(),
+                (dir_path / f"{target_date}.collection.json").resolve()}
+    if any(Path(p).resolve() in reserved for p in (extra_files or {})):
+        raise TimesheetReconciliationError("AI export cannot overwrite a timesheet or audit sidecar")
+    contents = dict(extra_files or {})
     if merged != existing or not json_file.exists():
-        json_file.write_text(json_content, encoding="utf-8")
+        contents[json_file] = json_content
     if merged != existing or context_changed or review_changed or not md_file.exists():
-        md_file.write_text(md_content, encoding="utf-8")
+        contents[md_file] = md_content
     if context_changed:
-        context_file.write_text(context_content, encoding="utf-8")
+        contents[context_file] = context_content
     if review_changed:
-        review_file.write_text(json.dumps(review_record, indent=2), encoding="utf-8")
+        contents[review_file] = json.dumps(review_record, indent=2)
+    if collection_manifest is not None:
+        manifest = {"date": target_date, **collection_manifest,
+            "calendar_context_count": len(context), "calendar_context_file": context_file.name if write_context else None,
+            "unassigned_activity_count": len(unassigned), "activity_review_file": review_file.name if write_review else None,
+            "review": {"status": "required" if unassigned or any(e.get("calendar_overlap") for e in merged) else "none"}}
+        contents[dir_path / f"{target_date}.collection.json"] = json.dumps(manifest, indent=2)
+    write_bundle(contents, dir_path)
     return {"dates": {target_date: {**counts, "json_path": str(json_file), "md_path": str(md_file),
                                    "unassigned_activity_count": len(unassigned),
                                    **({"activity_review_path": str(review_file)} if write_review else {}),

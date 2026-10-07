@@ -17,7 +17,7 @@ DATE = "2026-10-06"
 
 def row(start="09:00", end="12:00", minutes=180, description="Development", kind=None):
     result = {"entry": {"date": DATE, "start": start, "end": end,
-                        "duration_minutes": minutes, "description": description},
+                        "duration_minutes": minutes, "description": description if kind in ("manual", "override") else description + ". PRs: None"},
               "sources": {"calendar": [description]}}
     if kind:
         result["provenance"] = {"kind": kind}

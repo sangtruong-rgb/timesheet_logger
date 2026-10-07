@@ -27,17 +27,7 @@ from activity_review import unpack_activity_snapshot
 
 import re
 
-TICKET_PATTERN = re.compile(r'\b([A-Z]{2,10}-[0-9]+)\b')
-
-
-def extract_tickets(texts: List[str]) -> List[str]:
-    """Extract unique Jira/linear ticket identifiers such as PAY-123 or PROJ-456."""
-    tickets = set()
-    for t in texts:
-        matches = TICKET_PATTERN.findall(t)
-        for m in matches:
-            tickets.add(m)
-    return sorted(list(tickets))
+from activity_text import extract_tickets
 
 
 def format_pr_suffix(prs: List[Dict[str, Any]]) -> str:
@@ -130,6 +120,8 @@ def map_ai_judgments(block_by_id, judgments):
     for item in judgments:
         if not isinstance(item, dict) or not isinstance(item.get("description"), str) or not item["description"].strip():
             raise AIJudgmentError("Each AI summary requires an object with a nonempty description")
+        if re.search(r"\bPRs\s*:|#[0-9]+\b", item["description"], re.IGNORECASE):
+            raise AIJudgmentError("AI summaries must omit PR references and the script-owned PRs suffix")
         if "block_id" in item:
             key = item["block_id"]
             if not isinstance(key, str) or key not in block_by_id:
@@ -174,6 +166,12 @@ def build_entries(
         date_str = b.get("date", "")
         start_time = b.get("start_time", "")
         end_time = b.get("end_time", "")
+        if "duration_minutes" not in b:
+            raise AIJudgmentError("Candidate blocks require an explicit duration")
+        for field in ("commits", "prs", "calendar_events", "calendar_titles"):
+            values = b.get(field, [])
+            if not isinstance(values, list) or any(not isinstance(v, str if field == "calendar_titles" else dict) for v in values):
+                raise AIJudgmentError("Candidate source fields must contain correctly typed arrays")
 
         # Resolve topic summary
         topic_summary = ""
@@ -186,6 +184,9 @@ def build_entries(
                 topic_summary = "Calendar overlap — attendance confirmation required. " + topic_summary
         else:
             topic_summary = synthesize_deterministic_summary(b)
+            topic_summary = re.sub(r"\bPRs\s*:.*", "", topic_summary, flags=re.IGNORECASE).strip()
+            topic_summary = re.sub(r"#[0-9]+\b", "", topic_summary)
+            topic_summary = " ".join(topic_summary.split()).strip() or "Activity recorded."
 
         # Append inline PR list exactly once at the end
         pr_suffix = format_pr_suffix(b.get("prs", []))
@@ -194,6 +195,8 @@ def build_entries(
         entry_record = {
             "block_id": key,
             "summary_source": "ai" if ai_match else "fallback",
+            **({"interval": b["interval"]} if "interval" in b else {}),
+            **({"timezone": b["timezone"]} if "timezone" in b else {}),
             **({"time_basis": b["time_basis"]} if "time_basis" in b else {}),
             **({"attendance": "unconfirmed"} if b.get("time_basis") == "scheduled" else {}),
             **({"estimation_reason": b["estimation_reason"]} if "estimation_reason" in b else {}),

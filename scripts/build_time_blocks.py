@@ -281,6 +281,10 @@ def build_time_blocks(normalized_data: Dict[str, Any], *, unassigned_activity=No
         blocks = [block for block, _ in supported]
         block_bounds = [bounds for _, bounds in supported]
 
+    for block, (start, end) in zip(blocks, block_bounds):
+        block["interval"] = {"start": start.isoformat(), "end": end.isoformat()}
+        block["timezone"] = normalized_data.get("timezone", getattr(tz, "key", str(tz)))
+
     def retain_unassigned(source, activity, timestamp):
         if unassigned_activity is None:
             return

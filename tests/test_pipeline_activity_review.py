@@ -56,7 +56,7 @@ class TestPipelineActivityReview(unittest.TestCase):
         self.assertEqual(manifest['unassigned_activity_count'],1)
         self.assertEqual(manifest['activity_review_file'],f'{DATE}.activity-review.json')
         payload=json.loads(self.ai.read_text())
-        self.assertEqual(payload['blocks'][0]['prs'],[])
+        self.assertEqual(payload['blocks'],[])
         self.assertEqual(payload['unassigned_activity'][0]['id'],55)
         self.assertIn('REVIEW REQUIRED',self.stdout.getvalue())
 
