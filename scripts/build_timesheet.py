@@ -56,6 +56,11 @@ def synthesize_deterministic_summary(block: Dict[str, Any]) -> str:
     commits = block.get("commits", [])
     prs = block.get("prs", [])
 
+    if block.get("calendar_overlap"):
+        titles = "; ".join(cal_titles).strip() or "Calendar events"
+        text = f"Calendar overlap — attendance confirmation required: {titles}"
+        return text if text.endswith((".", "!", "?")) else f"{text}."
+
     # Pure meeting block
     if not commits and not prs and (cal_titles or block.get("time_basis") == "scheduled"):
         text = "; ".join(cal_titles).strip() or "Calendar event"
@@ -174,6 +179,8 @@ def build_entries(
             topic_summary = ai_match["description"].strip()
             if not topic_summary.endswith("."):
                 topic_summary += "."
+            if b.get("calendar_overlap"):
+                topic_summary = "Calendar overlap — attendance confirmation required. " + topic_summary
         else:
             topic_summary = synthesize_deterministic_summary(b)
 
@@ -186,6 +193,7 @@ def build_entries(
             "summary_source": "ai" if ai_match else "fallback",
             **({"time_basis": b["time_basis"]} if "time_basis" in b else {}),
             **({"estimation_reason": b["estimation_reason"]} if "estimation_reason" in b else {}),
+            **({"calendar_overlap": True, "review": b["review"]} if b.get("calendar_overlap") else {}),
             "entry": {
                 "date": date_str,
                 "start": start_time,
@@ -195,6 +203,7 @@ def build_entries(
             },
             "sources": {
                 "calendar": b.get("calendar_titles", []),
+                **({"calendar_events": b["calendar_events"]} if "calendar_events" in b else {}),
                 "commits": b.get("commits", []),
                 "pull_requests": b.get("prs", [])
             }

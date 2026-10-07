@@ -1,4 +1,4 @@
-"""F04/F05 assembly with synthetic collector responses, real block/storage code."""
+"""F04–F06 assembly with synthetic collector responses, real block/storage code."""
 import contextlib
 import io
 import json
@@ -142,6 +142,69 @@ class TestPipelineEvidenceBlocks(unittest.TestCase):
         self.assertEqual(self.pipeline([], calendar_status="error"), 2)
         for path, content in before.items():
             self.assertEqual(path.read_bytes(), content)
+
+    def test_overlap_pipeline_exports_disjoint_proposal_with_attendance_review(self):
+        events = [event("09:00", "10:00", "A"), event("09:30", "10:30", "B")]
+        self.assertEqual(self.pipeline(events, [commit("09:45")]), 0)
+        rows = self.rows()
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(sum(r["entry"]["duration_minutes"] for r in rows), 90)
+        self.assertTrue(rows[1]["calendar_overlap"])
+        self.assertEqual(rows[1]["review"]["attendance"], "unconfirmed")
+        self.assertEqual(rows[1]["sources"]["calendar_events"], events)
+        self.assertEqual(len(rows[1]["sources"]["commits"]), 1)
+        self.assertTrue(json.loads(self.ai.read_text())[1]["calendar_overlap"])
+        self.assertIn("**Total Proposed Time:** 90 mins", (self.output / f"{DATE}.md").read_text())
+        self.assertIn("REVIEW REQUIRED", self.stdout.getvalue())
+        manifest = json.loads((self.output / f"{DATE}.collection.json").read_text())
+        self.assertEqual(manifest["status"], "complete")
+
+    def test_identical_calendar_intervals_are_not_duplicate_identity_failure(self):
+        events = [event("09:00", "10:00", "A"), event("09:00", "10:00", "B")]
+        self.assertEqual(self.pipeline(events), 0)
+        self.assertEqual(len(self.rows()), 1)
+        self.assertEqual(self.rows()[0]["sources"]["calendar_events"], events)
+        self.assertEqual(self.rows()[0]["entry"]["duration_minutes"], 60)
+
+    def test_rerun_replaces_old_overlapping_generated_rows(self):
+        from save_timesheet import save_timesheet
+        old = [{"entry": {"date": DATE, "start": start, "end": end, "duration_minutes": 60,
+                         "description": "Old scheduled meeting. PRs: None"}, "sources": {}}
+               for start, end in [("09:00", "10:00"), ("09:30", "10:30")]]
+        save_timesheet(old, self.output, target_date=DATE, collection_status="complete")
+        self.assertEqual(self.pipeline([event("09:00", "10:00", "A"), event("09:30", "10:30", "B")]), 0)
+        self.assertEqual(len(self.rows()), 3)
+        self.assertIn("Removed: 2", self.stdout.getvalue())
+        self.assertEqual(sum(r["entry"]["duration_minutes"] for r in self.rows()), 90)
+
+    def test_overlap_exact_rerun_preserves_files_and_removing_event_clears_review(self):
+        events = [event("09:00", "10:00", "A"), event("09:30", "10:30", "B")]
+        self.assertEqual(self.pipeline(events), 0)
+        before = self.snapshot()
+        self.assertEqual(self.pipeline(list(reversed(events))), 0)
+        for path, content in before.items():
+            self.assertEqual(path.read_bytes(), content)
+        self.assertEqual(self.pipeline([events[0]]), 0)
+        self.assertEqual(len(self.rows()), 1)
+        self.assertFalse(self.rows()[0].get("calendar_overlap"))
+        self.assertNotIn("REVIEW REQUIRED", (self.output / f"{DATE}.md").read_text())
+
+    def test_calendar_failure_preserves_overlap_review_proposal(self):
+        self.assertEqual(self.pipeline([event("09:00", "10:00", "A"), event("09:30", "10:30", "B")]), 0)
+        before = self.snapshot()
+        self.assertEqual(self.pipeline([], calendar_status="error"), 2)
+        for path, content in before.items():
+            self.assertEqual(path.read_bytes(), content)
+
+    def test_invalid_partition_bounds_create_review_draft_and_preserve_final_files(self):
+        self.assertEqual(self.pipeline([event()]), 0)
+        before = self.snapshot()
+        self.assertEqual(self.pipeline([event("10:00", "09:00", "Invalid bounds")]), 2)
+        for path, content in before.items():
+            self.assertEqual(path.read_bytes(), content)
+        draft = json.loads((self.output / "drafts" / f"{DATE}.json").read_text())
+        self.assertEqual(draft["activity"]["calendar"][0]["title"], "Invalid bounds")
+        self.assertEqual(draft["ai_validation"]["status"], "error")
 
 
 if __name__ == "__main__":

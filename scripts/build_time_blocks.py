@@ -5,6 +5,8 @@ build_time_blocks.py - Deterministic time blocking and activity association.
 Rules:
 1. When calendar events exist:
    - Calendar events define explicit blocks (meetings, stand-ups, focus time).
+   - Overlapping events are partitioned into disjoint intervals with all sources;
+     overlap requires attendance review, not an assumption of attendance.
    - Development gaps require a timestamped commit/PR inside their interval.
      These durations are estimated, not proof of continuous work.
    - All development gaps exclude 12:00–13:30 before checking activity.
@@ -80,11 +82,7 @@ def build_time_blocks(normalized_data: Dict[str, Any]) -> List[Dict[str, Any]]:
 
     # CASE A: Calendar events exist
     if calendar:
-        # Sort calendar events
-        sorted_events = sorted(
-            [e for e in calendar if parse_dt(e.get("start")) and parse_dt(e.get("end"))],
-            key=lambda e: parse_dt(e["start"])
-        )
+        valid_events = [e for e in calendar if parse_dt(e.get("start")) and parse_dt(e.get("end"))]
 
         # Standard bounds
         day_start = datetime.datetime.combine(target_date, datetime.time(9, 0), tzinfo=tz)
@@ -92,14 +90,29 @@ def build_time_blocks(normalized_data: Dict[str, Any]) -> List[Dict[str, Any]]:
         lunch_end = datetime.datetime.combine(target_date, datetime.time(13, 30), tzinfo=tz)
         day_end = datetime.datetime.combine(target_date, datetime.time(17, 30), tzinfo=tz)
 
-        # We construct timeline segments
-        segments = []
-        for ev in sorted_events:
+        # Partition at event boundaries; each minute has one set of active sources.
+        event_bounds = []
+        for ev in valid_events:
             s = parse_dt(ev["start"])
             e = parse_dt(ev["end"])
+            if s.tzinfo is None or e.tzinfo is None or e <= s:
+                from block_identity import BlockIdentityError
+                raise BlockIdentityError("Calendar partitioning requires aware timestamps and end after start")
+            s, e = s.astimezone(tz), e.astimezone(tz)
+            event_bounds.append((s, e, ev))
+        boundaries = sorted({time for s, e, _ in event_bounds for time in (s, e)})
+        segments = []
+        for s, e in zip(boundaries, boundaries[1:]):
+            active = [dict(ev) for start, end, ev in event_bounds if start <= s and e <= end]
+            if not active:
+                continue
+            active.sort(key=lambda ev: (parse_dt(ev["start"]), parse_dt(ev["end"]),
+                                        ev.get("title", ""), ev["start"], ev["end"]))
             segments.append({
                 "type": "calendar",
-                "title": ev.get("title", ""),
+                "calendar_events": active,
+                "calendar_titles": list(dict.fromkeys(ev.get("title", "") for ev in active if ev.get("title"))),
+                "calendar_overlap": len(active) > 1,
                 "start": s,
                 "end": e
             })
@@ -149,7 +162,11 @@ def build_time_blocks(normalized_data: Dict[str, Any]) -> List[Dict[str, Any]]:
                 "start_time": format_hhmm(s_dt),
                 "end_time": format_hhmm(e_dt),
                 "duration_minutes": calculate_minutes(s_dt, e_dt),
-                "calendar_titles": [item["title"]] if not estimated and item.get("title") else [],
+                "calendar_titles": item.get("calendar_titles", []),
+                **({"calendar_events": item["calendar_events"]} if not estimated else {}),
+                **({"calendar_overlap": True, "review": {
+                    "status": "required", "reasons": ["calendar_overlap"], "attendance": "unconfirmed"
+                }} if item.get("calendar_overlap") else {}),
                 "block_type": item["type"],
                 "time_basis": "estimated" if estimated else "scheduled",
                 **({"estimation_reason": "calendar_gap_with_activity"} if estimated else {}),

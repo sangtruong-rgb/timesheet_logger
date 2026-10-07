@@ -213,8 +213,28 @@ events overlapping lunch are retained whole. Lunch-only commit/PR evidence is
 preserved through the existing unmatched-activity fallback, whose routing remains
 F08. Lunch times are currently hardcoded; reading configurable workday settings
 remains D02. No-Calendar fallback is unchanged, including its morning-only
-`09:00–12:30` proposal; that inconsistency remains D02. Calendar overlaps and
-all-day/cross-midnight handling remain F06/F07.
+`09:00–12:30` proposal; that inconsistency remains D02. All-day/cross-midnight
+handling remains F07.
+
+### Overlapping Calendar events
+
+Events are partitioned at every start/end boundary, retaining each active event's
+original title/start/end under `sources.calendar_events`. For A 09:00–10:00 and
+B 09:30–10:30, the proposal is A 09:00–09:30, A+B 09:30–10:00, and B 10:00–10:30:
+90 scheduled minutes rather than 120. Identical intervals share one block ID and
+retain both sources. Touching intervals are not overlaps. Calendar source records
+are normalized title/start/end records; provider event IDs remain unavailable.
+
+Conflicting intervals carry `calendar_overlap: true` and
+`review: {status: required, reasons: [calendar_overlap], attendance: unconfirmed}`.
+AI input includes the conflict and unconfirmed attendance. JSON, descriptions,
+Markdown and CLI preserve the review notice even with supplied AI summaries.
+Totals containing conflicts are **Total Proposed Time**, never a claim of confirmed
+attendance. Source collection may be COMPLETE while attendance still needs review.
+The overlap is counted once in scheduled coverage, not added again as another total.
+Automatic attendance selection or confirmation is not implemented. A reviewer must
+decide which event was attended and for how long before treating the proposal as
+actual meeting time. Exact duplicate normalized records are already deduplicated.
 
 #### Remote GitHub Repositories
 The Git collector (`scripts/get_git_activity.py`) supports uncloned remote GitHub repositories in addition to local directories:

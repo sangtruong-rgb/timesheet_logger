@@ -75,12 +75,16 @@ def render_markdown(date_str: str, items: List[Dict[str, Any]], collection_statu
         lines[4:4] = ["> DEMO: contains explicitly selected fixture data; not a live work record.", ""]
 
     has_estimates = any(item.get("time_basis") == "estimated" for item in items)
+    has_overlap = any(item.get("calendar_overlap") for item in items)
+    if has_overlap:
+        lines[4:4] = ["> REVIEW REQUIRED: overlapping Calendar events need attendance confirmation. Scheduled coverage is not confirmed meeting time.", ""]
     if has_estimates:
         lines[4:4] = ["> Estimated intervals are proposals based on activity timestamps, not measured work time.", ""]
 
     total_minutes = 0
     scheduled_minutes = 0
     estimated_minutes = 0
+    overlap_minutes = 0
     for it in items:
         e = it.get("entry", {})
         s = it.get("sources", {})
@@ -94,6 +98,9 @@ def render_markdown(date_str: str, items: List[Dict[str, Any]], collection_statu
         elif basis == "estimated":
             estimated_minutes += dur
         duration_text = f"{dur}m" + (f" ({basis})" if basis in ("scheduled", "estimated") else "")
+        if it.get("calendar_overlap"):
+            overlap_minutes += dur
+            duration_text += " — attendance review required"
         desc = e.get("description", "").replace("\n", " ").replace("|", "\\|")
 
         src_parts = []
@@ -115,11 +122,13 @@ def render_markdown(date_str: str, items: List[Dict[str, Any]], collection_statu
     hours = total_minutes // 60
     mins = total_minutes % 60
     lines.append("")
-    total_label = "Total Proposed Time" if has_estimates else "Total Tracked Time"
+    total_label = "Total Proposed Time" if has_estimates or has_overlap else "Total Tracked Time"
     lines.append(f"**{total_label}:** {total_minutes} mins ({hours}h {mins:02d}m)")
     if any(item.get("time_basis") in ("scheduled", "estimated") for item in items):
         lines.append(f"Scheduled Calendar: {scheduled_minutes} mins; estimated development: {estimated_minutes} mins; "
                      f"manual/unclassified: {total_minutes - scheduled_minutes - estimated_minutes} mins.")
+    if has_overlap:
+        lines.append(f"Calendar overlap awaiting attendance confirmation: {overlap_minutes} mins (included in scheduled total).")
     lines.append("")
     return "\n".join(lines)
 
