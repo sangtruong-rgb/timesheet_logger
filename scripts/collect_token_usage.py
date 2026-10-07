@@ -166,7 +166,7 @@ def csv_contents(csv_path, new_records):
         if '/' in valid['session_id'] and any(key[1] == valid['session_id'] and key[0] != valid['date'] for key in existing):
             raise ValueError('Attributed run identity cannot move between execution dates')
         existing[(valid['date'],valid['session_id'])]=valid
-    stream=io.StringIO(newline=''); writer=csv.DictWriter(stream,fieldnames=FIELDS)
+    stream=io.StringIO(newline=''); writer=csv.DictWriter(stream,fieldnames=FIELDS,lineterminator="\n")
     writer.writeheader(); writer.writerows(existing[k] for k in sorted(existing))
     return stream.getvalue(), sum(r['total_tokens'] for r in existing.values())
 
@@ -178,6 +178,21 @@ def update_csv(csv_path, new_records):
         content,total=csv_contents(path,new_records)
         if not path.exists() or path.read_bytes() != content.encode('utf-8'): atomic_write(path,content)
     return total
+
+
+def daily_totals(csv_path, date):
+    """Separate measured transcripts from self-reported totals; exclude legacy/synthetic rows."""
+    categories = {name: {key: 0 for key in FIELDS[2:6]} for name in ("transcript", "self_reported")}
+    with Path(csv_path).open(encoding="utf-8", newline="") as stream:
+        for raw in csv.DictReader(stream):
+            row = validated_record(raw)
+            if row["date"] != date: continue
+            try: metadata = json.loads(row["notes"])
+            except ValueError: continue
+            if not isinstance(metadata, dict) or metadata.get("source") not in categories: continue
+            for key in FIELDS[2:6]: categories[metadata["source"]][key] += row[key]
+    return {"execution_date": date, "by_provenance": categories,
+            "excludes": "legacy/unattributed/synthetic rows; selected-message scope remains in run notes"}
 
 
 def main():
@@ -209,7 +224,7 @@ def main():
         update_csv(paths['csv_path'],[record])
     except (ValueError,OSError,TypeError) as exc:
         print(f'Token recording blocked: {exc}',file=sys.stderr); return 2
-    print(json.dumps({'record':record,'csv_path':str(paths['csv_path'])},indent=2)); return 0
+    print(json.dumps({'record':record,'execution_day_totals':daily_totals(paths['csv_path'],record['date']),'csv_path':str(paths['csv_path'])},indent=2)); return 0
 
 
 if __name__=='__main__': sys.exit(main())

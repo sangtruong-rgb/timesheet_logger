@@ -86,7 +86,7 @@ def prepare_activity_input(blocks, unassigned_activity, max_bytes=12000):
             break
         measurement.update(serialized_bytes=size, estimated_tokens_heuristic=(size + 3)//4)
     if size > max_bytes:
-        raise BlockIdentityError(f"AI payload is {size} bytes, above limit {max_bytes}; split the activity snapshot before synthesis. No evidence was dropped.")
+        raise BlockIdentityError(f"AI payload is {size} bytes, above limit {max_bytes}; select a smaller scope or set an explicit larger byte bound before synthesis. No evidence was dropped.")
     return payload
 
 
