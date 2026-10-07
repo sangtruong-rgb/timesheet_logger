@@ -30,7 +30,7 @@ class TestRunTokens(unittest.TestCase):
         self.manifest.write_text(json.dumps(self.config))
 
     def line(self, id='msg-a', time='09:15', input=100, output=20, cache=5):
-        return {'timestamp':f'2026-10-07T{time}:00+07:00', 'message':{'id':id, 'usage':{'input_tokens':input,'output_tokens':output,'cache_read_input_tokens':cache}}}
+        return {'timestamp':f'2026-10-07T{time}:00+07:00', 'message':{'id':id, 'usage':{'input_tokens':input,'output_tokens':output,'cache_read_input_tokens':cache,'cache_creation_input_tokens':0}}}
 
     def write(self, lines):
         self.transcript.write_text('\n'.join(json.dumps(v) for v in lines)+'\n')
@@ -67,9 +67,13 @@ class TestRunTokens(unittest.TestCase):
         self.write([a,b]); self.assertEqual(self.collect()['date'],'2026-10-06'); self.assertEqual(self.collect()['total_tokens'],250)
         self.assertEqual(parse_session_file(self.transcript,'2026-10-07',self.zone)['total_tokens'],125)
 
-    def test_bad_lines_do_not_discard_valid_records(self):
-        self.write([self.line(), {'message':'text'}, {'response':[]},self.line(id='bad',input=None), [],self.line(id='strings',input='10',output='2',cache='3')])
+    def test_non_usage_lines_do_not_discard_valid_records(self):
+        self.write([self.line(), {'message':'text'}, {'response':[]}, [],self.line(id='strings',input='10',output='2',cache='3')])
         self.assertEqual(self.collect()['total_tokens'],140)
+
+    def test_invalid_in_scope_usage_blocks_total_instead_of_skipping(self):
+        self.write([self.line(),self.line(id='bad',input=None)])
+        with self.assertRaisesRegex(ValueError,'nonnegative'): self.collect()
 
     def test_invalid_counts_reject_null_bool_negative_and_float(self):
         for value in (None,True,-1,1.5,'-1','1.5'):
@@ -136,7 +140,7 @@ class TestPipelineRunTokens(unittest.TestCase):
     invoke = storage_fixture.TestRemainingStorage.invoke
     def test_assemble_collects_marked_usage_with_snapshot_run_id(self):
         snapshot=self.freeze(); transcript=self.directory/'session.jsonl'
-        transcript.write_text(json.dumps({'timestamp':'2026-10-07T09:05:00+07:00','message':{'id':'m','usage':{'input_tokens':100,'output_tokens':20,'cache_read_input_tokens':5}}}))
+        transcript.write_text(json.dumps({'timestamp':'2026-10-07T09:05:00+07:00','message':{'id':'m','usage':{'input_tokens':100,'output_tokens':20,'cache_read_input_tokens':5,'cache_creation_input_tokens':0}}}))
         manifest=self.directory/'usage.json'; manifest.write_text(json.dumps({'run_id':snapshot['run_id'],'target_date':'2026-10-06','session_file':str(transcript),'started_at':'2026-10-07T09:00:00+07:00','ended_at':'2026-10-07T09:10:00+07:00'}))
         token=self.directory/'token-output/tokens.csv'
         arguments=['--phase','assemble','--snapshot',str(self.snapshot),'--output-dir',str(self.output),'--usage-run-manifest',str(manifest),'--token-csv-path',str(token)]

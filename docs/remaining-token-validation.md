@@ -12,12 +12,23 @@ inside the window. A window can only represent the full skill run when the calle
 marks that run accurately; concurrent unrelated messages require explicit IDs.
 Selected-message totals are labeled accordingly, not claimed full-run totals.
 
-Counts accept nonnegative integers/numeric digit strings. Null, negative, boolean
-and fractional values are rejected per line without discarding valid lines.
-Repeated message IDs use the latest timestamped usage snapshot, not a sum. Old
-records lacking IDs only deduplicate exact JSON snapshots; broader identity cannot
-be inferred. Missing selected IDs or no attributed usage blocks recording. A valid
-explicit zero usage record is different from absence of evidence.
+Counts accept nonnegative integers/numeric digit strings. Supported schema is
+`complete_usage_snapshot_v1`: input, output, cache-read and cache-creation counts
+must all be explicit. Canonical names or the existing aliases are accepted only
+when every component is present; conflicting aliases/containers are blocked.
+Missing counts are unknown, never zero. A sparse record, unsupported usage object,
+invalid count or raw streaming event inside the selected scope blocks recording
+instead of silently removing evidence or publishing a partial total. No partial
+snapshot merge is inferred. See [R04 schema policy](r04-usage-schema-validation.md).
+
+Repeated message IDs use the latest timestamped complete snapshot, not a sum.
+Conflicting snapshots at the same timestamp are blocked. Scope filtering happens
+before validating counts, so unrelated usage outside the run/window/selected IDs
+does not block an attributed run. Usage without a valid aware timestamp cannot be
+scoped and is blocked. Malformed JSON also blocks because its scope is unknown;
+non-usage control records are ignored. Old records lacking IDs only deduplicate
+exact JSON snapshots; broader identity cannot be inferred. Missing selected IDs or
+no attributed usage blocks recording. Explicit zero in all four fields is valid.
 
 Input/output/cache remain separate; cache combines read and creation. Total is
 input + output + cache. This is a token-volume metric, not price-equivalent billing
@@ -31,8 +42,9 @@ its cumulative total. Manual records require a run ID and are labeled self-repor
 They do not establish measured transcript provenance.
 
 Assemble invokes the collector when --usage-run-manifest is supplied; the run ID
-must match the immutable snapshot. Missing evidence yields token_usage: unknown
-and leaves CSV untouched. Collecting after the last skill response is also supported
+must match the immutable snapshot. No usage manifest yields token_usage: unknown and leaves CSV untouched. An
+explicit invalid/incomplete manifest or transcript blocks assembly before final
+files/CSV are changed. Collecting after the last skill response is also supported
 via the standalone collector; it can include usage unavailable during assembly.
 
 CSV headers/rows/counts/duplicate identities are checked before replacement;
@@ -41,7 +53,7 @@ When usage accompanies assembly, CSV participates in the recoverable output bund
 and rollback, with all relevant directory locks acquired in canonical sorted order.
 No-record calls neither initialize nor rewrite a CSV.
 
-Validation: 393 tests pass, including 19 new tests for attribution, selected IDs,
-updated/repeated snapshots, malformed lines, cross-midnight execution vs target
-attribution, cumulative reruns/multiple runs, CSV validation/atomic failures and
-pipeline+CSV transaction rollback. All JSONL in these tests is synthetic.
+Validation: synthetic JSONL regression tests cover explicit attribution, selected
+IDs, complete/repeated snapshots, sparse/invalid usage, scope filtering, execution
+vs target dates, CSV preservation and pipeline transaction rollback. Real Claude
+transcript acceptance remains V01; synthetic usage is not measured live evidence.
