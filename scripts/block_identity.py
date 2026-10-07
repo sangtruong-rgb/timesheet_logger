@@ -37,6 +37,17 @@ def index_blocks(blocks):
             values = block.get(field, [])
             if not isinstance(values, list) or any(not isinstance(v, str if field == "calendar_titles" else dict) for v in values):
                 raise BlockIdentityError("Candidate source fields must contain correctly typed arrays")
+        for record in block.get("commits", []):
+            if "message" in record and not isinstance(record["message"], str):
+                raise BlockIdentityError("Commit message must be text")
+        for record in block.get("prs", []):
+            identity = record.get("id")
+            if isinstance(identity, bool) or not isinstance(identity, int) or identity < 1:
+                raise BlockIdentityError("PR IDs must be positive integers")
+            if "title" in record and not isinstance(record["title"], str):
+                raise BlockIdentityError("PR title must be text")
+            if "repository" in record and not isinstance(record["repository"], str):
+                raise BlockIdentityError("PR repository must be text")
         if "duration_minutes" in block:
             from interval_validation import validate_interval
             validate_interval(block["date"], block["start_time"], block["end_time"], block["duration_minutes"], block.get("interval"))

@@ -60,6 +60,7 @@ class TestTokenUsage(unittest.TestCase):
 
             # Second update with same session ID should update in place, not duplicate
             rec1_updated = dict(rec1)
+            rec1_updated["input_tokens"] = 370
             rec1_updated["total_tokens"] = 500
             update_csv(csv_path, [rec1_updated])
 

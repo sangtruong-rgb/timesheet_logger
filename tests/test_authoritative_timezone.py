@@ -237,7 +237,7 @@ class TestStandaloneTimezoneCLI(unittest.TestCase):
         normalized=self.invoke('normalize_activity.py',*override)
         self.assertEqual(json.loads(normalized.stdout)['timezone'],'Asia/Ho_Chi_Minh')
         csv_path=self.directory/'tokens.csv'
-        response=self.invoke('collect_token_usage.py','--record-usage','synthetic-run','1','2','3','--csv-path',str(csv_path),*override)
+        response=self.invoke('collect_token_usage.py','--run-id','run-1','--record-usage','synthetic-run','1','2','3','--csv-path',str(csv_path),*override)
         self.assertEqual(response.returncode,0,response.stderr)
         with csv_path.open() as handle:row=next(csv.DictReader(handle))
         self.assertEqual(row['date'],'2026-01-01');self.assertIn('Asia/Ho_Chi_Minh',row['notes'])
@@ -256,7 +256,10 @@ class TestStandaloneTimezoneCLI(unittest.TestCase):
         transcript=self.directory/'synthetic.jsonl'
         transcript.write_text('\n'.join(json.dumps({'timestamp':timestamp,'usage':{'input_tokens':tokens}}) for timestamp,tokens in [('2026-01-01T04:59:59Z',10),('2026-01-01T05:00:00Z',20),('2026-01-02T05:00:00Z',30)]))
         output=self.directory/'tokens.csv'
-        response=self.invoke('collect_token_usage.py','--session-file',str(transcript),'--csv-path',str(output))
+        manifest=self.directory/'run.json'
+        manifest.write_text(json.dumps({'run_id':'test-run','target_date':'2026-01-01','session_file':str(transcript),
+            'started_at':'2026-01-01T00:00:00-05:00','ended_at':'2026-01-02T00:00:00-05:00'}))
+        response=self.invoke('collect_token_usage.py','--run-manifest',str(manifest),'--csv-path',str(output))
         self.assertEqual(response.returncode,0,response.stderr)
         with output.open() as handle:row=next(csv.DictReader(handle))
         self.assertEqual(row['input_tokens'],'20');self.assertIn('America/New_York',row['notes'])

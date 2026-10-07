@@ -106,6 +106,9 @@ def run():
     parser.add_argument("--export-ai-input", type=str, default=None, help="Path to write the minimal AI payload")
     parser.add_argument("--output-dir", type=str, default="data/timesheets", help="Timesheet output directory")
 
+    parser.add_argument("--usage-run-manifest", help="Explicit run/session/time-window evidence for Claude usage")
+    parser.add_argument("--token-csv-path", help="Isolated token output; default from profile/environment/repo root")
+    parser.add_argument("--claude-dir", help="Exact session lookup root (no global usage aggregation)")
     args = parser.parse_args()
     if args.phase == "assemble":
         if not args.snapshot:
@@ -122,6 +125,8 @@ def run():
         except (ValueError, OSError) as exc:
             print(f" SNAPSHOT BLOCKED: {exc}", file=sys.stderr)
             return 2
+    if args.phase == "prepare" and args.usage_run_manifest:
+        parser.error("Record usage after synthesis with assemble or the token collector")
     if args.phase == "prepare" and args.ai_output:
         parser.error("prepare does not assemble AI output; use --phase assemble with the prepared snapshot")
     try:
@@ -241,6 +246,25 @@ def assemble_activity(args, date_str, normalized, collection, output_dir, *, fro
         print(f" Activity/AI-input draft: {draft}")
         print(" Final timesheets, collection manifest, AI input, and token records were not written.")
         return 2
+    token_records, token_csv = [], None
+    collection = dict(collection)
+    collection["token_usage"] = {"status": "unknown", "reason": "No explicit attributed usage supplied"}
+    if args.usage_run_manifest:
+        try:
+            if demo: raise ValueError("DEMO usage is recorded separately, never into a live token store")
+            from collect_token_usage import collect_run
+            from token_settings import token_settings
+            from activity_settings import resolve_timezone
+            paths = token_settings(args.config, args.claude_dir, args.token_csv_path)
+            record = collect_run(args.usage_run_manifest, resolve_timezone(normalized["timezone"], allow_legacy_offset=True),
+                expected_target=date_str, expected_run=frozen["run_id"] if frozen else None, claude_dir=paths["claude_dir"])
+            token_records, token_csv = [record], paths["csv_path"]
+            collection["token_usage"] = {"status": "attributed", "execution_date": record["date"],
+                "run_identity": record["session_id"], **{key: record[key] for key in ("input_tokens", "output_tokens", "cache_tokens", "total_tokens")},
+                "attribution": json.loads(record["notes"])}
+        except (ValueError, OSError, TypeError) as exc:
+            print(f" TOKEN ATTRIBUTION BLOCKED: {exc}; final files and token records preserved.", file=sys.stderr)
+            return 2
     ai_payload_json = json.dumps(ai_payload, indent=2)
     for entry in entries:
         entry["collection"] = collection
@@ -257,7 +281,8 @@ def assemble_activity(args, date_str, normalized, collection, output_dir, *, fro
     try:
         save_result = save_timesheet(entries, str(output_dir), target_date=date_str,
                                      collection_status=collection["status"], calendar_context=normalized["calendar_context"],
-                                     unassigned_activity=unassigned_activity, collection_manifest=collection, extra_files=extra_files)
+                                     unassigned_activity=unassigned_activity, collection_manifest=collection, extra_files=extra_files,
+                                     token_records=token_records, token_csv=token_csv)
     except TimesheetReconciliationError as exc:
         draft = save_activity_draft(date_str, normalized, collection, output_dir, str(exc), entries)
         print(f"\n RECONCILIATION BLOCKED: {exc}", file=sys.stderr)
@@ -267,7 +292,11 @@ def assemble_activity(args, date_str, normalized, collection, output_dir, *, fro
     manifest_path = output_dir / f"{date_str}.collection.json"
     # Step 9: Token usage tracking
     print(f">> [6/6] Checking token tracking for {date_str} ({normalized['timezone']})...")
-    print(" Token usage unavailable: no explicit run usage supplied; token records preserved.")
+    if token_records:
+        r = token_records[0]
+        print(f" Attributed usage: input={r['input_tokens']}, output={r['output_tokens']}, cache={r['cache_tokens']}, total={r['total_tokens']}; CSV: {token_csv}")
+    else:
+        print(" Token usage unknown: no explicit run usage supplied; token records preserved.")
 
     print("\n DEMO completed — explicitly selected fixtures; output isolated under demo/."
           if demo else "\n Pipeline run successfully completed!")
