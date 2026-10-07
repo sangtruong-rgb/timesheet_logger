@@ -25,3 +25,8 @@ client_secret*.json
 # Local logs & caches
 .cache/
 *.log
+
+# Explicit demo outputs and incomplete activity drafts
+data/timesheets/demo/
+data/timesheets/drafts/
+data/raw/demo/

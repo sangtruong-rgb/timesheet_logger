@@ -68,6 +68,9 @@ def render_markdown(date_str: str, items: List[Dict[str, Any]]) -> str:
         "| :--- | :---: | :--- | :--- |"
     ]
 
+    if any(item.get("collection", {}).get("status") == "demo" for item in items):
+        lines[4:4] = ["> DEMO: contains explicitly selected fixture data; not a live work record.", ""]
+
     total_minutes = 0
     for it in items:
         e = it.get("entry", {})

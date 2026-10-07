@@ -141,13 +141,24 @@ def main():
     commits = []
     prs = []
     calendar = []
+    collection_sources = {}
+
+    def read_source(path, name):
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            if data.get("status") != "success" or not isinstance(data.get("items"), list):
+                parser.error(f"{name} collection was not successful; use run_pipeline.py to review an incomplete draft")
+            from collection_result import source_metadata
+            collection_sources[name] = source_metadata(data)
+            return data["items"]
+        return data  # Existing list-only fixtures remain supported.
 
     if args.commits_file and Path(args.commits_file).exists():
         commits = json.loads(Path(args.commits_file).read_text(encoding="utf-8"))
     if args.prs_file and Path(args.prs_file).exists():
-        prs = json.loads(Path(args.prs_file).read_text(encoding="utf-8"))
+        prs = read_source(args.prs_file, "pull_requests")
     if args.calendar_file and Path(args.calendar_file).exists():
-        calendar = json.loads(Path(args.calendar_file).read_text(encoding="utf-8"))
+        calendar = read_source(args.calendar_file, "calendar")
 
     # If raw-dir requested, persist raw copies for audit
     if args.raw_dir:
@@ -158,6 +169,8 @@ def main():
         (raw_path / f"raw_calendar_{target_date_str}.json").write_text(json.dumps(calendar, indent=2), encoding="utf-8")
 
     normalized = normalize_all(target_date_str, commits, prs, calendar)
+    if collection_sources:
+        normalized["collection_sources"] = collection_sources
     output_json = json.dumps(normalized, indent=2)
 
     if args.output and args.output != "-":

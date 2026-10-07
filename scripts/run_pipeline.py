@@ -23,13 +23,52 @@ import subprocess
 import sys
 from pathlib import Path
 
+from collection_result import collection_result, source_metadata
+
+
+def run_source_collector(command, source, mode):
+    """Keep source failures distinct from a successfully collected empty list."""
+    response = subprocess.run(command, capture_output=True, text=True, check=False)
+    if response.stderr:
+        print(response.stderr.rstrip(), file=sys.stderr)
+    try:
+        result = json.loads(response.stdout)
+        if (not isinstance(result, dict) or result.get("source") != source
+                or result.get("mode") != mode
+                or result.get("status") not in ("success", "unavailable", "error")
+                or not isinstance(result.get("items"), list)
+                or any(not isinstance(item, dict) for item in result["items"])
+                or (result["status"] == "success" and response.returncode != 0)
+                or (result["status"] != "success" and result["items"])):
+            raise ValueError("Invalid collector outcome")
+        return result
+    except (ValueError, TypeError):
+        return collection_result(source, mode, "error", reason="Collector returned an invalid result")
+
+
+def save_activity_draft(date_str, normalized, collection, output_dir):
+    """An incomplete run records evidence, never replaces a final timesheet."""
+    draft_dir = Path(output_dir) / "drafts"
+    draft_dir.mkdir(parents=True, exist_ok=True)
+    payload = {"date": date_str, "collection": collection, "activity": normalized}
+    json_path = draft_dir / f"{date_str}.json"
+    json_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    lines = [f"# Activity draft — {date_str}", "",
+             "> INCOMPLETE: a source is unavailable or failed. This is not a completed timesheet.", ""]
+    for name, source in collection["sources"].items():
+        lines.append(f"- {name}: {source['status']} ({source['mode']}, {source['count']} items)")
+    lines.extend(["", "## Collected evidence", "", "```json",
+                  json.dumps(normalized, indent=2), "```", ""])
+    (draft_dir / f"{date_str}.md").write_text("\n".join(lines), encoding="utf-8")
+    return json_path
+
 
 def run():
     parser = argparse.ArgumentParser(description="Run the end-to-end timesheet pipeline.")
     parser.add_argument("--date", type=str, default=None, help="Target date YYYY-MM-DD (default: today)")
     parser.add_argument("--repos", nargs="+", default=["."], help="Repositories to scan for Git activity")
-    parser.add_argument("--calendar-fixture", type=str, default=None, help="Calendar fixture path if credentials absent")
-    parser.add_argument("--prs-fixture", type=str, default=None, help="PR fixture path if CLI/token absent")
+    parser.add_argument("--calendar-fixture", type=str, default=None, help="Explicit Calendar demo/test fixture")
+    parser.add_argument("--prs-fixture", type=str, default=None, help="Explicit PR demo/test fixture")
     parser.add_argument("--ai-output", type=str, default=None, help="Pre-computed AI topic judgments JSON")
     parser.add_argument("--export-ai-input", type=str, default=None, help="Path to write the minimal AI payload")
     parser.add_argument("--output-dir", type=str, default="data/timesheets", help="Timesheet output directory")
@@ -50,21 +89,35 @@ def run():
     pr_cmd = [sys.executable, str(scripts_dir / "get_pr_activity.py"), "--date", date_str]
     if args.prs_fixture:
         pr_cmd += ["--fixture", args.prs_fixture]
-    res_pr = subprocess.run(pr_cmd, capture_output=True, text=True, check=True)
-    prs_data = json.loads(res_pr.stdout)
+    pr_result = run_source_collector(pr_cmd, "github", "fixture" if args.prs_fixture is not None else "live")
 
     # Step 3: Collect Calendar events
     print(f">> [3/6] Collecting Calendar events for {date_str}...")
     cal_cmd = [sys.executable, str(scripts_dir / "get_calendar_activity.py"), "--date", date_str]
     if args.calendar_fixture:
         cal_cmd += ["--fixture", args.calendar_fixture]
-    res_cal = subprocess.run(cal_cmd, capture_output=True, text=True, check=True)
-    cal_data = json.loads(res_cal.stdout)
+    cal_result = run_source_collector(cal_cmd, "google_calendar", "fixture" if args.calendar_fixture is not None else "live")
 
     # Step 4: Normalize
     print(">> [4/6] Normalizing data and eliminating redundancy...")
     from normalize_activity import normalize_all
-    normalized = normalize_all(date_str, commits_data, prs_data, cal_data)
+    normalized = normalize_all(date_str, commits_data, pr_result["items"], cal_result["items"])
+    source_results = {"pull_requests": pr_result, "calendar": cal_result}
+    incomplete = any(result["status"] != "success" for result in source_results.values())
+    demo = any(result["mode"] == "fixture" for result in source_results.values())
+    collection = {
+        "status": "incomplete" if incomplete else "demo" if demo else "complete",
+        "sources": {name: source_metadata(result) for name, result in source_results.items()},
+    }
+    for name, source in collection["sources"].items():
+        print(f"   {name}: {source['status']} ({source['mode']}, {source['count']} items)")
+    if incomplete:
+        draft = save_activity_draft(date_str, normalized, collection, args.output_dir)
+        print(f"\n INCOMPLETE: review source setup/errors. Activity draft: {draft}")
+        print(" Final timesheets, AI input, and token records were not written.")
+        return 2
+
+    output_dir = Path(args.output_dir) / "demo" if demo else Path(args.output_dir)
 
     # Step 5: Build time blocks
     from build_time_blocks import build_time_blocks
@@ -76,8 +129,12 @@ def run():
 
     ai_payload_json = json.dumps(ai_payload, indent=2)
     if args.export_ai_input:
-        Path(args.export_ai_input).write_text(ai_payload_json, encoding="utf-8")
-        print(f"   -> AI payload written to {args.export_ai_input}")
+        ai_path = Path(args.export_ai_input)
+        if demo:
+            ai_path = ai_path.parent / "demo" / ai_path.name
+        ai_path.parent.mkdir(parents=True, exist_ok=True)
+        ai_path.write_text(ai_payload_json, encoding="utf-8")
+        print(f"   -> AI payload written to {ai_path}")
 
     # Step 7: Build entries
     from build_timesheet import build_entries
@@ -86,24 +143,33 @@ def run():
         ai_judgments = json.loads(Path(args.ai_output).read_text(encoding="utf-8"))
 
     entries = build_entries(blocks, ai_judgments)
+    for entry in entries:
+        entry["collection"] = collection
 
     # Step 8: Save idempotently
     print(">> [5/6] Saving timesheet idempotently...")
     from save_timesheet import save_timesheet
-    save_result = save_timesheet(entries, args.output_dir)
+    save_result = save_timesheet(entries, str(output_dir))
+    output_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = output_dir / f"{date_str}.collection.json"
+    manifest_path.write_text(json.dumps({"date": date_str, **collection}, indent=2), encoding="utf-8")
 
     # Step 9: Token usage tracking
     print(">> [6/6] Checking token tracking...")
     from collect_token_usage import update_csv
-    update_csv(Path("data/token-usage.csv"), [])
+    if not demo:
+        update_csv(Path("data/token-usage.csv"), [])
 
-    print("\n Pipeline run successfully completed!")
+    print("\n DEMO completed — explicitly selected fixtures; output isolated under demo/."
+          if demo else "\n Pipeline run successfully completed!")
+    print(f" Collection manifest: {manifest_path}")
     if "dates" in save_result and date_str in save_result["dates"]:
         info = save_result["dates"][date_str]
         print(f" Timesheet JSON: {info['json_path']}")
         print(f" Timesheet Markdown: {info['md_path']}")
         print(f" Total Entries: {info['total_entries']} (Inserted: {info['inserted']}, Updated: {info['updated']})")
+    return 0
 
 
 if __name__ == "__main__":
-    run()
+    sys.exit(run())
