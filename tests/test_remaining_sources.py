@@ -13,8 +13,6 @@ from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
-from calendar_settings import calendar_settings
-from activity_settings import settings
 from get_calendar_activity import fetch_google_calendar_events
 from get_git_activity import get_commits_for_repo, fetch_github_api_commits
 from normalize_activity import normalize_all
@@ -33,6 +31,26 @@ def raw_event(identity="a", title="Planning"):
 
 
 class TestRemainingSources(unittest.TestCase):
+    def configuration_in_subprocess(self, config, *, environment=None, calendar_args=None, repos=None, cwd=None):
+        """Exercise os.environ in a fresh interpreter, without patching settings."""
+        env = dict(os.environ)
+        for name in ("GOOGLE_CALENDAR_TOKEN", "GOOGLE_CALENDAR_CREDENTIALS", "TIMESHEET_REPOS", "PYTHONPATH"):
+            env.pop(name, None)
+        env.update(environment or {})
+        script = (
+            "import json,sys;sys.path.insert(0,sys.argv[1]);"
+            "from calendar_settings import calendar_settings;"
+            "from activity_settings import load_config,settings;"
+            "args=json.load(sys.stdin);"
+            "print(json.dumps({'calendar':calendar_settings(args['config'],**args['calendar']),"
+            "'repositories':settings(load_config(args['config']),repos=args['repos'])['repos']}))"
+        )
+        result = subprocess.run([sys.executable, "-c", script, str(ROOT / "scripts")],
+            input=json.dumps({"config": str(config), "calendar": calendar_args or {}, "repos": repos}),
+            env=env, cwd=cwd, capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout)
+
     def fake_google(self, responses):
         service = Mock()
         service.events.return_value.list.return_value.execute.side_effect = responses
@@ -119,17 +137,69 @@ class TestRemainingSources(unittest.TestCase):
     def test_calendar_paths_cli_environment_profile_default_precedence(self):
         with tempfile.TemporaryDirectory() as temp:
             config = Path(temp)/"profile.json"
-            config.write_text(json.dumps({"calendar": {"token_path": "profile-token.json"}}))
-            with patch.dict(os.environ, {}, clear=True):
-                self.assertEqual(calendar_settings(config)["token_path"], str((Path(temp)/"profile-token.json").resolve()))
-            with patch.dict(os.environ, {"GOOGLE_CALENDAR_TOKEN": str(Path(temp)/"env.json")}):
-                self.assertEqual(calendar_settings(config)["token_path"], str(Path(temp)/"env.json"))
-                self.assertEqual(calendar_settings(config, token=str(Path(temp)/"cli.json"))["token_path"], str(Path(temp)/"cli.json"))
+            config.write_text(json.dumps({"calendar": {"token_path": "profile-token.json", "credentials_path": "profile-client.json"}}))
+            paths = self.configuration_in_subprocess(config)["calendar"]
+            self.assertEqual(paths["token_path"], str((Path(temp)/"profile-token.json").resolve()))
+            self.assertEqual(paths["credentials_path"], str((Path(temp)/"profile-client.json").resolve()))
+            environment = {"GOOGLE_CALENDAR_TOKEN": str(Path(temp)/"env.json"),
+                           "GOOGLE_CALENDAR_CREDENTIALS": str(Path(temp)/"env-client.json")}
+            paths = self.configuration_in_subprocess(config, environment=environment)["calendar"]
+            self.assertEqual(paths["token_path"], environment["GOOGLE_CALENDAR_TOKEN"])
+            self.assertEqual(paths["credentials_path"], environment["GOOGLE_CALENDAR_CREDENTIALS"])
+            paths = self.configuration_in_subprocess(config, environment=environment,
+                calendar_args={"token": str(Path(temp)/"cli.json"), "credentials": str(Path(temp)/"cli-client.json")})["calendar"]
+            self.assertEqual(paths["token_path"], str(Path(temp)/"cli.json"))
+            self.assertEqual(paths["credentials_path"], str(Path(temp)/"cli-client.json"))
+            config.write_text("{}")
+            paths = self.configuration_in_subprocess(config, cwd=temp)["calendar"]
+            self.assertEqual(paths["token_path"], str(ROOT/"token.json"))
+            self.assertEqual(paths["credentials_path"], str(ROOT/"credentials.json"))
 
     def test_repository_environment_override_below_cli_above_profile(self):
-        with patch.dict(os.environ, {"TIMESHEET_REPOS": "alice/repo,bob/repo"}):
-            self.assertEqual(settings({"repositories": ["profile/repo"]})["repos"], ["alice/repo", "bob/repo"])
-            self.assertEqual(settings({}, repos=["cli/repo"])["repos"], ["cli/repo"])
+        with tempfile.TemporaryDirectory() as temp:
+            config = Path(temp)/"profile.json"
+            config.write_text(json.dumps({"repositories": ["profile/repo"]}))
+            environment = {"TIMESHEET_REPOS": "alice/repo,bob/repo"}
+            self.assertEqual(self.configuration_in_subprocess(config)["repositories"], ["profile/repo"])
+            self.assertEqual(self.configuration_in_subprocess(config, environment=environment)["repositories"], ["alice/repo", "bob/repo"])
+            self.assertEqual(self.configuration_in_subprocess(config, environment=environment, repos=["cli/repo"])["repositories"], ["cli/repo"])
+
+    def test_calendar_relative_environment_paths_use_invoking_directory(self):
+        with tempfile.TemporaryDirectory(prefix="calendar env ") as temp:
+            profile_dir = Path(temp)/"profile"; profile_dir.mkdir()
+            invoking_dir = Path(temp)/"invoking project"; invoking_dir.mkdir()
+            config = profile_dir/"config.json"; config.write_text("{}")
+            environment = {"GOOGLE_CALENDAR_TOKEN": "secret folder/token.json",
+                           "GOOGLE_CALENDAR_CREDENTIALS": "secret folder/client.json"}
+            paths = self.configuration_in_subprocess(config, environment=environment, cwd=invoking_dir)["calendar"]
+            self.assertEqual(paths["token_path"], str((invoking_dir/"secret folder/token.json").resolve()))
+            self.assertEqual(paths["credentials_path"], str((invoking_dir/"secret folder/client.json").resolve()))
+
+    def test_collector_missing_environment_token_does_not_fall_back_to_profile(self):
+        with tempfile.TemporaryDirectory() as temp:
+            config = Path(temp)/"profile.json"
+            config.write_text(json.dumps({"calendar": {"token_path": "profile-token.json"}}))
+            (Path(temp)/"profile-token.json").write_text("{}")
+            env = dict(os.environ, GOOGLE_CALENDAR_TOKEN=str(Path(temp)/"missing-env-token.json"))
+            env.pop("PYTHONPATH", None)
+            response = subprocess.run([sys.executable, str(ROOT/"scripts/get_calendar_activity.py"),
+                "--config", str(config), "--date", str(DAY)], env=env, cwd=temp,
+                capture_output=True, text=True, timeout=30)
+            self.assertEqual(response.returncode, 2, response.stderr)
+            envelope = json.loads(response.stdout)
+            self.assertEqual((envelope["mode"], envelope["status"], envelope["items"]), ("live", "unavailable", []))
+
+    def test_collector_empty_environment_token_is_configuration_error(self):
+        with tempfile.TemporaryDirectory() as temp:
+            config = Path(temp)/"profile.json"; config.write_text("{}")
+            env = dict(os.environ, GOOGLE_CALENDAR_TOKEN="")
+            env.pop("PYTHONPATH", None)
+            response = subprocess.run([sys.executable, str(ROOT/"scripts/get_calendar_activity.py"),
+                "--config", str(config), "--date", str(DAY)], env=env, cwd=temp,
+                capture_output=True, text=True, timeout=30)
+            self.assertEqual(response.returncode, 2)
+            self.assertIn("must be a nonempty path", response.stderr)
+            self.assertEqual(response.stdout, "")
 
     def test_distinct_local_same_basename_has_distinct_identity_and_bound_fails(self):
         with tempfile.TemporaryDirectory() as temp:
