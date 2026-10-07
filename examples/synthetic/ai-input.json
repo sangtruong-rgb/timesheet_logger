@@ -1,0 +1,63 @@
+{
+  "blocks": [
+    {
+      "block_id": "2026-10-07_09:30_10:00",
+      "time_basis": "scheduled",
+      "calendar_overlap": true,
+      "attendance": "unconfirmed",
+      "date": "2026-10-07",
+      "block": {
+        "start": "09:30",
+        "end": "10:00"
+      },
+      "calendar_titles": [
+        "Synthetic meeting A",
+        "Synthetic meeting B"
+      ],
+      "commit_messages": [],
+      "prs": [
+        {
+          "id": 7,
+          "title": "DEMO-1 Validation",
+          "repository": "demo-one/work"
+        },
+        {
+          "id": 7,
+          "title": "DEMO-1 Validation",
+          "repository": "demo-two/work"
+        }
+      ],
+      "detected_ticket_ids": [
+        "DEMO-1"
+      ]
+    },
+    {
+      "block_id": "2026-10-07_10:30_12:00",
+      "time_basis": "estimated",
+      "date": "2026-10-07",
+      "block": {
+        "start": "10:30",
+        "end": "12:00"
+      },
+      "calendar_titles": [],
+      "commit_messages": [
+        "DEMO-1 Fix validation"
+      ],
+      "prs": [],
+      "detected_ticket_ids": [
+        "DEMO-1"
+      ]
+    }
+  ],
+  "unassigned_activity": [],
+  "review": {
+    "status": "none",
+    "instruction": "Summarize only blocks. Unassigned activity needs human review; do not attach it to a block or infer work duration."
+  },
+  "payload_measurement": {
+    "serialized_bytes": 1453,
+    "estimated_tokens_heuristic": 364,
+    "token_count_is_exact": false,
+    "max_bytes": 12000
+  }
+}

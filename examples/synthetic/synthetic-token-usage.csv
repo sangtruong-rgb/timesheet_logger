@@ -1,0 +1,2 @@
+date,session_id,input_tokens,output_tokens,cache_tokens,total_tokens,notes
+2026-10-07,synthetic-demo/v1,100,20,5,125,"{""source"": ""synthetic"", ""scope"": ""fabricated_demo_numbers_not_measurement""}"

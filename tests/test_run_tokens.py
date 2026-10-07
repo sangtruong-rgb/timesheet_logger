@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT/'scripts'))
-from collect_token_usage import collect_run, parse_session_file, parse_transcript_line_usage, update_csv, main
+from collect_token_usage import collect_run, parse_session_file, parse_transcript_line_usage, update_csv, main, daily_totals
 from token_settings import token_settings
 import test_remaining_storage as storage_fixture
 from save_timesheet import TimesheetReconciliationError, save_timesheet
@@ -92,6 +92,7 @@ class TestRunTokens(unittest.TestCase):
         with self.csv.open() as stream: rows=list(csv.DictReader(stream))
         self.assertEqual(len(rows),2)
         self.assertEqual(sum(int(v['total_tokens']) for v in rows),260)
+        self.assertEqual(daily_totals(self.csv,'2026-10-07')['by_provenance']['transcript']['total_tokens'],260)
 
     def test_bad_csv_header_duplicate_invalid_total_preserved(self):
         self.write([self.line()]); r=self.collect()

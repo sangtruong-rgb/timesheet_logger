@@ -134,7 +134,7 @@ def save_activity_draft(date_str, normalized, collection, output_dir, storage_re
     return json_path
 
 
-def run():
+def _run():
     parser = argparse.ArgumentParser(description="Run the end-to-end timesheet pipeline.")
     parser.add_argument("--date", type=str, default=None, help="Target date YYYY-MM-DD (default: today)")
     parser.add_argument("--phase", choices=("run", "prepare", "assemble"), default="run")
@@ -149,7 +149,7 @@ def run():
     parser.add_argument("--prs-fixture", type=str, default=None, help="Explicit PR demo/test fixture")
     parser.add_argument("--ai-output", type=str, default=None, help="Pre-computed AI topic judgments JSON")
     parser.add_argument("--export-ai-input", type=str, default=None, help="Path to write the minimal AI payload")
-    parser.add_argument("--output-dir", type=str, default="data/timesheets", help="Timesheet output directory")
+    parser.add_argument("--output-dir", type=str, default=str(Path(__file__).resolve().parent.parent / "data/timesheets"), help="Timesheet output directory")
 
     parser.add_argument("--usage-run-manifest", help="Explicit run/session/time-window evidence for Claude usage")
     parser.add_argument("--token-csv-path", help="Isolated token output; default from profile/environment/repo root")
@@ -375,6 +375,14 @@ def assemble_activity(args, date_str, normalized, collection, output_dir, *, fro
         print(f" Total Entries: {info['total_entries']} (Inserted: {info['inserted']}, Updated: {info['updated']}, "
               f"Removed: {info['removed']}, Manual preserved: {info['preserved_manual']}, Overridden: {info['overridden']})")
     return 0
+
+
+def run():
+    try:
+        return _run()
+    except (OSError, ValueError) as exc:
+        print(f" Pipeline blocked ({type(exc).__name__}): {exc}. Review output/draft paths; no successful completion claimed.", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

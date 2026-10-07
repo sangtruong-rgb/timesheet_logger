@@ -34,5 +34,7 @@ data/timesheets/demo/
 data/timesheets/drafts/
 data/raw/demo/
 
-# Pending multi-directory transaction reservation (local only)
+# Local transactional storage metadata (never publish rollback contents)
+.timesheet.lock
+.timesheet-transaction.json
 .timesheet-pending.json

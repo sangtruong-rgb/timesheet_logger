@@ -31,12 +31,17 @@ def load_fixture_records(fixture_path):
 
 def emit_result(result, output=None):
     text = json.dumps(result, indent=2)
-    if output and output != "-":
-        path = Path(output)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8")
-    else:
-        print(text)
+    try:
+        if output and output != "-":
+            from atomic_storage import directory_lock, atomic_write
+            path = Path(output)
+            with directory_lock(path.parent):
+                atomic_write(path, text)
+        else:
+            print(text)
+    except (OSError, ValueError) as exc:
+        print(f"Collector output blocked ({type(exc).__name__}); review output path. Source evidence was not exported.", file=sys.stderr)
+        return 2
     print(f"{result['source']}: {result['status']} ({result['mode']}, "
           f"{len(result['items'])} items)" +
           (f" — {result['reason']}" if result.get("reason") else ""), file=sys.stderr)

@@ -175,5 +175,12 @@ class TestRemainingStorage(unittest.TestCase):
             save_timesheet(build_entries(self.blocks), self.output, target_date=DATE, collection_status='complete', extra_files={self.output/f'{DATE}.json':'wrong'})
         self.assertFalse((self.output/f'{DATE}.json').exists())
 
+    def test_suffix_must_match_generated_source_references(self):
+        row = build_entries(self.blocks)[0]
+        row["entry"]["description"] = "Invalid summary. PRs: #999"
+        with self.assertRaises(TimesheetReconciliationError):
+            save_timesheet([row], self.output, target_date=DATE, collection_status="complete")
+        self.assertFalse((self.output/f"{DATE}.json").exists())
+
 
 if __name__ == '__main__': unittest.main()

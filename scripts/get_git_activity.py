@@ -379,12 +379,16 @@ def main():
     if args.envelope or result["status"] != "success":
         return emit_result(result, args.output)
     output = json.dumps(result["items"], indent=2)
-    if args.output and args.output != "-":
-        path = Path(args.output)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(output, encoding="utf-8")
-    else:
-        print(output)
+    try:
+        if args.output and args.output != "-":
+            from atomic_storage import directory_lock, atomic_write
+            path = Path(args.output)
+            with directory_lock(path.parent): atomic_write(path, output)
+        else:
+            print(output)
+    except (OSError, ValueError) as exc:
+        print(f"Git output blocked ({type(exc).__name__}); review output path.", file=sys.stderr)
+        return 2
     return 0
 
 

@@ -9,8 +9,8 @@ Filters out all unnecessary fields:
 - No raw timestamps or durations
 - No duplicated strings
 
-Includes future optimization:
-- Deterministic ticket ID extraction (e.g. PROJ-123) to pre-group activities.
+Extracts ticket IDs only; does not cluster activities or cache AI judgments.
+Payload bytes are bounded, with an explicitly heuristic token estimate.
 """
 
 import argparse
@@ -86,7 +86,7 @@ def prepare_activity_input(blocks, unassigned_activity, max_bytes=12000):
             break
         measurement.update(serialized_bytes=size, estimated_tokens_heuristic=(size + 3)//4)
     if size > max_bytes:
-        raise BlockIdentityError(f"AI payload is {size} bytes, above limit {max_bytes}; split the activity snapshot before synthesis. No evidence was dropped.")
+        raise BlockIdentityError(f"AI payload is {size} bytes, above limit {max_bytes}; select a smaller scope or set an explicit larger byte bound before synthesis. No evidence was dropped.")
     return payload
 
 
@@ -110,12 +110,17 @@ def main():
         return 2
 
     output_json = json.dumps(payloads, indent=2)
-    if args.output and args.output != "-":
-        out_p = Path(args.output)
-        out_p.parent.mkdir(parents=True, exist_ok=True)
-        out_p.write_text(output_json, encoding="utf-8")
-    else:
-        print(output_json)
+    try:
+        if args.output and args.output != "-":
+            from atomic_storage import directory_lock, atomic_write
+            out_p = Path(args.output)
+            with directory_lock(out_p.parent):
+                atomic_write(out_p, output_json)
+        else:
+            print(output_json)
+    except (ValueError, OSError) as exc:
+        print(f"Output blocked: {exc}", file=sys.stderr)
+        return 2
     return 0
 
 

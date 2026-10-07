@@ -252,7 +252,7 @@ def normalize_all(target_date, commits, prs, calendar, timezone_str=None):
             "commits": active_commits, "pull_requests": active_prs, "unassigned_activity": unassigned}
 
 
-def main():
+def _main():
     parser = argparse.ArgumentParser(description="Normalize daily activity data into compact model.")
     add_timezone_arguments(parser)
     parser.add_argument("--date", type=str, default=None, help="Target date YYYY-MM-DD (default: today)")
@@ -329,6 +329,14 @@ def main():
     else:
         print(output_json)
     return 0
+
+
+def main():
+    try:
+        return _main()
+    except (OSError, ValueError) as exc:
+        print(f"Output/validation blocked ({type(exc).__name__}); review supplied inputs and output path.", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":
