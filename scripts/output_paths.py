@@ -47,7 +47,7 @@ def validate_auxiliary_output(path, *, protected_paths=(), role="AI export"):
         if protected is not None and same_location(path, protected):
             raise OutputPathError(f"{role} cannot overwrite protected input/output '{path}'; choose a different output path")
     names = {path.name, path.resolve().name}
-    if any(DAILY_FILE.fullmatch(name) or name in RESERVED_NAMES for name in names):
+    if path.suffix.lower() == ".jsonl" or any(DAILY_FILE.fullmatch(name) or name in RESERVED_NAMES for name in names):
         raise OutputPathError(f"{role} cannot overwrite a timesheet, audit sidecar or reserved file '{path}'; choose a different output path")
     if path.is_symlink() or path.is_dir() or stored_evidence(path):
         raise OutputPathError(f"{role} cannot replace stored evidence, a symlink or directory '{path}'; choose a different output path")

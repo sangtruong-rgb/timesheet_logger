@@ -11,6 +11,8 @@ Protected inputs include the snapshot, AI judgments, profile, PR/Calendar fixtur
 configured/CLI/environment OAuth paths, token CSV paths, usage run manifest and its
 explicitly referenced session_file. Paths are canonicalized; existing same-file
 aliases are checked. Symlink export destinations are refused.
+Usage transcript `.jsonl` destinations are reserved as well. Supported tilde paths
+in OAuth/token settings are expanded before comparing them with exports.
 
 Daily filename conventions are reserved for evidence, in **any directory**:
 
