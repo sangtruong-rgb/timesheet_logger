@@ -67,8 +67,11 @@ class TestPipelineSources(unittest.TestCase):
         self.assert_final_outputs_unchanged()
 
     def test_fixture_demo_is_isolated_labelled_and_exact_rerun_is_idempotent(self):
+        repo = self.cwd / "empty-repo"
+        repo.mkdir()
+        subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
         args = ["--prs-fixture", str(ROOT / "data/fixtures/sample_prs.json"),
-                "--calendar-fixture", str(ROOT / "data/fixtures/sample_calendar.json")]
+                "--calendar-fixture", str(ROOT / "data/fixtures/sample_calendar.json"), "--repos", str(repo)]
         first = self.run_pipeline(*args)
         second = self.run_pipeline(*args)
         self.assertEqual(first.returncode, 0, first.stderr)
