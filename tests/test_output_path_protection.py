@@ -101,6 +101,10 @@ class TestOutputPathProtection(unittest.TestCase):
                 target = self.directory / "custom-file.json"; target.write_text("{}")
                 profile.write_text(json.dumps({section: {field: target.name}}))
                 self.assert_blocked(target, "--config", str(profile))
+        for flag in ("--calendar-token", "--calendar-credentials"):
+            target = self.directory / "custom-oauth.json"; target.write_text("{}")
+            tilde_path = "~/" + os.path.relpath(target, Path.home())
+            self.assert_blocked(target, flag, tilde_path)
 
     def test_actual_environment_oauth_and_usage_paths_preserved(self):
         for name in ("GOOGLE_CALENDAR_TOKEN", "GOOGLE_CALENDAR_CREDENTIALS", "TIMESHEET_TOKEN_CSV"):
@@ -153,6 +157,7 @@ class TestOutputPathProtection(unittest.TestCase):
                 check_ai_export(args, path)
             if (ROOT / "scripts/token_settings.py").exists():
                 self.assert_blocked(path, "--usage-run-manifest", str(manifest))
+        self.assert_blocked(transcript)  # Session-ID lookup transcripts are JSONL too.
         self.assertEqual(self.file_bytes(), before)
 
     def test_valid_export_and_exact_rerun_still_succeed(self):

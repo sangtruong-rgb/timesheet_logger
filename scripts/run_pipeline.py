@@ -38,7 +38,7 @@ def protected_input_paths(args):
                  "calendar_token", "calendar_credentials", "usage_run_manifest", "token_csv_path"):
         value = getattr(args, name, None)
         if value:
-            paths.append(value)
+            paths.append(Path(value).expanduser() if name in ("calendar_token", "calendar_credentials", "token_csv_path") else value)
     for name in ("GOOGLE_CALENDAR_TOKEN", "GOOGLE_CALENDAR_CREDENTIALS", "TIMESHEET_TOKEN_CSV"):
         if os.environ.get(name):
             paths.append(Path(os.environ[name]).expanduser())
