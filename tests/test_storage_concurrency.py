@@ -196,6 +196,22 @@ class TestStorageConcurrency(unittest.TestCase):
         self.assertEqual([r['session_id'] for r in rows], ['csv-b'])
         self.assertEqual(rows[0]['total_tokens'], '15')
         self.assert_clean_metadata()
+        before_crash = self.shared.read_bytes()
+        crashed = self.launch('writer-c', mode='timesheet-token', fault='crash', pause=True)
+        self.wait_for(self.directory / 'writer-c.ready')
+        self.assertEqual(crashed.wait(timeout=5), 73)
+        partial = self.shared.read_bytes()
+        blocked = self.launch('csv-d', mode='csv')
+        self.assertEqual(blocked.wait(timeout=5), 2)
+        self.assertEqual(self.shared.read_bytes(), partial)
+        with directory_lock(self.directory / 'writer-c', extra_paths=[self.shared]):
+            self.assertEqual(self.shared.read_bytes(), before_crash)
+        retry = self.launch('csv-d', mode='csv')
+        self.assertEqual(retry.wait(timeout=5), 0)
+        with self.shared.open(newline='') as stream:
+            rows = list(csv.DictReader(stream))
+        self.assertEqual([r['session_id'] for r in rows], ['csv-b', 'csv-d'])
+        self.assert_clean_metadata()
 
 
 if __name__ == '__main__':
