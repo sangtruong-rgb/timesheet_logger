@@ -26,19 +26,52 @@ def nonnegative(value):
     return value
 
 
+COUNT_FIELDS = (
+    ('input_tokens', 'prompt_tokens'),
+    ('output_tokens', 'completion_tokens'),
+    ('cache_read_input_tokens', 'cache_read'),
+    ('cache_creation_input_tokens', 'cache_creation'),
+)
+USAGE_SCHEMA = 'complete_usage_snapshot_v1'
+
+
+def usage_containers(obj):
+    if not isinstance(obj, dict): return []
+    return [container for container in (obj, obj.get('message'), obj.get('response'))
+            if isinstance(container, dict) and 'usage' in container]
+
+
+def has_usage(obj):
+    return bool(usage_containers(obj)) or (isinstance(obj, dict) and
+        ('model_usage' in obj or obj.get('type') == 'stream_event'))
+
+
 def usage_object(obj):
-    if not isinstance(obj, dict): return None
-    for container in (obj, obj.get('message'), obj.get('response')):
-        if isinstance(container, dict) and isinstance(container.get('usage'), dict): return container['usage']
-    return obj.get('model_usage') if isinstance(obj.get('model_usage'), dict) else None
+    candidates = [container['usage'] for container in usage_containers(obj)]
+    if isinstance(obj, dict) and 'model_usage' in obj: candidates.append(obj['model_usage'])
+    if not candidates: return None
+    if any(not isinstance(value, dict) for value in candidates):
+        raise ValueError('Unsupported usage object; token total is not established')
+    if any(value != candidates[0] for value in candidates[1:]):
+        raise ValueError('Conflicting usage containers; token total is not established')
+    return candidates[0]
 
 
 def parse_transcript_line_usage(obj):
+    """Complete snapshots only. Missing counts are unknown, including cache counts."""
+    if isinstance(obj, dict) and obj.get('type') in ('message_start', 'message_delta', 'stream_event'):
+        raise ValueError('Raw streaming usage requires a verified adapter; token total is not established')
     usage = usage_object(obj)
-    if usage is None: return 0, 0, 0
-    def count(primary, alias): return nonnegative(usage.get(primary, usage.get(alias, 0)))
-    return (count('input_tokens', 'prompt_tokens'), count('output_tokens', 'completion_tokens'),
-            count('cache_read_input_tokens', 'cache_read') + count('cache_creation_input_tokens', 'cache_creation'))
+    if usage is None: return None
+    counts = []
+    for primary, alias in COUNT_FIELDS:
+        present = [nonnegative(usage[key]) for key in (primary, alias) if key in usage]
+        if not present:
+            raise ValueError(f'Incomplete usage snapshot: missing {primary}; token total is not established')
+        if len(set(present)) != 1:
+            raise ValueError(f'Conflicting usage aliases for {primary}; token total is not established')
+        counts.append(present[0])
+    return counts[0], counts[1], counts[2] + counts[3]
 
 
 def usage_identity(obj):
@@ -52,29 +85,35 @@ def usage_identity(obj):
 
 
 def usage_records(path, start, end, message_ids=None):
-    """Last timestamped usage snapshot per message; a malformed line cannot lose valid ones."""
+    """Latest complete snapshot per message; never silently drop in-scope bad usage."""
     selected, skipped = {}, 0
     try:
         with Path(path).open(encoding='utf-8') as stream:
-            for line in stream:
+            for line_number, line in enumerate(stream, 1):
                 if not line.strip(): continue
                 try:
                     obj = json.loads(line)
-                    usage = usage_object(obj)
-                    recognized = {'input_tokens','output_tokens','prompt_tokens','completion_tokens',
-                                  'cache_read_input_tokens','cache_creation_input_tokens','cache_read','cache_creation'}
-                    if usage is None or not recognized.intersection(usage): continue
-                    counts = parse_transcript_line_usage(obj)
+                except ValueError as exc:
+                    raise ValueError(f'Transcript line {line_number} is malformed; usage scope cannot be established') from exc
+                if not has_usage(obj):
+                    if not isinstance(obj, dict): skipped += 1
+                    continue
+                key = usage_identity(obj)
+                if message_ids is not None and key not in message_ids: continue
+                try:
                     timestamp = parse_timestamp(obj.get('timestamp')).astimezone(datetime.timezone.utc)
-                    if not start <= timestamp < end: continue
-                    key = usage_identity(obj)
-                    if message_ids is not None and key not in message_ids: continue
-                    if key not in selected or timestamp >= selected[key][0]: selected[key] = (timestamp, counts)
-                except (ValueError, TypeError, KeyError, OverflowError):
-                    skipped += 1
+                except (ValueError, TypeError, KeyError, OverflowError) as exc:
+                    raise ValueError(f'Usage line {line_number} has no valid timestamp; token total is not established') from exc
+                if not start <= timestamp < end: continue
+                try:
+                    counts = parse_transcript_line_usage(obj)
+                except (ValueError, TypeError, KeyError, OverflowError) as exc:
+                    raise ValueError(f'Usage line {line_number}: {exc}') from exc
+                if key in selected and timestamp == selected[key][0] and counts != selected[key][1]:
+                    raise ValueError('Conflicting usage snapshots at the same timestamp; token total is not established')
+                if key not in selected or timestamp > selected[key][0]: selected[key] = (timestamp, counts)
     except (OSError, UnicodeError) as exc:
         raise ValueError('Requested transcript is unreadable; token records were preserved') from exc
-    if skipped: print(f'Warning: skipped {skipped} malformed/untimestamped usage line(s); valid records retained.', file=sys.stderr)
     if message_ids is not None and set(selected) != set(message_ids):
         raise ValueError('Selected usage message IDs are missing within run boundaries; token total is not established')
     return selected, skipped
@@ -135,6 +174,7 @@ def collect_run(manifest_path, tz, *, expected_target=None, expected_run=None, c
         'target_date':target, 'execution_date':execution_date,
         'started_at':manifest['started_at'], 'ended_at':manifest['ended_at'],
         'scope':'selected_messages' if ids else 'marked_run_window', 'messages':len(selected),
+        'usage_schema':USAGE_SCHEMA, 'missing_counts':'blocked',
         'skipped_lines':skipped, 'timezone':getattr(tz,'key',str(tz)),
         'total_definition':'input + output + cache_read + cache_creation'}, sort_keys=True)
     return make_record(execution_date, f'{transcript.stem}/{run_id}', counts, notes)
