@@ -2,6 +2,7 @@
 
 import datetime
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -71,7 +72,9 @@ def settings(config, repos=None, users=None, names=None, emails=None, timezone=N
         raise ValueError("github.users must contain explicit GitHub logins, not @me")
     if any(x in ("*", "all") for group in identity.values() for x in group):
         raise ValueError("Personal identity cannot contain wildcard aliases")
-    selected = repos if repos is not None else config.get("repositories", github.get("repositories", ["."]))
+    environment_repos = os.environ.get("TIMESHEET_REPOS")
+    selected = repos if repos is not None else (environment_repos.split(",") if environment_repos else
+                                               config.get("repositories", github.get("repositories", ["."])))
     selected = string_list(selected, "repositories")
     if not selected:
         raise ValueError("Select at least one repository")

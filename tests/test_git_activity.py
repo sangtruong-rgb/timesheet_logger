@@ -107,10 +107,8 @@ class TestGitActivity(unittest.TestCase):
             parse_github_repo_slug("https://github.com/facebook/react/"),
             ("facebook", "react")
         )
-        self.assertEqual(
-            parse_github_repo_slug("https://github.com/facebook/react/tree/main"),
-            ("facebook", "react")
-        )
+        with self.assertRaises(ValueError):
+            parse_github_repo_slug("https://github.com/facebook/react/tree/main")
         # SSH URLs
         self.assertEqual(
             parse_github_repo_slug("git@github.com:torvalds/linux.git"),

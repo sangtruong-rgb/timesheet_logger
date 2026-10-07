@@ -37,8 +37,14 @@ class TestPipelineSources(unittest.TestCase):
         self.config = self.cwd / "config.json"
         self.config.write_text(json.dumps({"author": {"names": ["Test User"]}, "timezone": "Asia/Ho_Chi_Minh"}))
         self.env = dict(os.environ, TZ="Asia/Ho_Chi_Minh", PATH="/usr/bin:/bin")
-        for name in ("GH_TOKEN", "GITHUB_TOKEN", "GITLAB_TOKEN", "PYTHONPATH"):
+        for name in ("GH_TOKEN", "GITHUB_TOKEN", "GITLAB_TOKEN", "PYTHONPATH",
+                     "GOOGLE_CALENDAR_TOKEN", "GOOGLE_CALENDAR_CREDENTIALS",
+                     "TIMESHEET_REPOS", "CLAUDE_DIR", "TIMESHEET_TOKEN_CSV"):
             self.env.pop(name, None)
+        # Real child-process environment: every test owns its Calendar paths.
+        # Missing-source tests leave this token absent; the empty-source test creates it.
+        self.env["GOOGLE_CALENDAR_TOKEN"] = str(self.cwd / "token.json")
+        self.env["GOOGLE_CALENDAR_CREDENTIALS"] = str(self.cwd / "credentials.json")
 
     def run_pipeline(self, *extra, export=True):
         command = [sys.executable, str(ROOT / "scripts/run_pipeline.py"),
@@ -67,8 +73,11 @@ class TestPipelineSources(unittest.TestCase):
         self.assert_final_outputs_unchanged()
 
     def test_fixture_demo_is_isolated_labelled_and_exact_rerun_is_idempotent(self):
+        repo = self.cwd / "empty-repo"
+        repo.mkdir()
+        subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
         args = ["--prs-fixture", str(ROOT / "data/fixtures/sample_prs.json"),
-                "--calendar-fixture", str(ROOT / "data/fixtures/sample_calendar.json")]
+                "--calendar-fixture", str(ROOT / "data/fixtures/sample_calendar.json"), "--repos", str(repo)]
         first = self.run_pipeline(*args)
         second = self.run_pipeline(*args)
         self.assertEqual(first.returncode, 0, first.stderr)
@@ -103,7 +112,8 @@ class TestPipelineSources(unittest.TestCase):
         self.assert_final_outputs_unchanged()
 
     def test_genuine_empty_live_sources_are_success_without_sample_data(self):
-        # Local API/CLI stand-ins exercise the real collectors and orchestrator.
+        # Deterministic service stand-ins test empty-source semantics, not live OAuth.
+        # Calendar configuration comes from the actual subprocess environment.
         binary = self.cwd / "bin"
         binary.mkdir()
         gh = binary / "gh"

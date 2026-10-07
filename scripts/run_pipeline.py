@@ -25,6 +25,7 @@ from pathlib import Path
 
 from collection_result import collection_result, source_metadata
 from activity_settings import add_settings_arguments, settings_from_args
+from calendar_settings import add_calendar_arguments, calendar_settings
 
 
 def run_source_collector(command, source, mode):
@@ -89,7 +90,10 @@ def run():
     parser = argparse.ArgumentParser(description="Run the end-to-end timesheet pipeline.")
     parser.add_argument("--date", type=str, default=None, help="Target date YYYY-MM-DD (default: today)")
     parser.add_argument("--repos", nargs="+", default=None, help="Repositories shared by Git and PR collection")
+    parser.add_argument("--max-local-commits", type=int, default=10000)
+    parser.add_argument("--max-remote-commits", type=int, default=10000)
     add_settings_arguments(parser)
+    add_calendar_arguments(parser)
     parser.add_argument("--calendar-fixture", type=str, default=None, help="Explicit Calendar demo/test fixture")
     parser.add_argument("--prs-fixture", type=str, default=None, help="Explicit PR demo/test fixture")
     parser.add_argument("--ai-output", type=str, default=None, help="Pre-computed AI topic judgments JSON")
@@ -99,6 +103,7 @@ def run():
     args = parser.parse_args()
     try:
         selected = settings_from_args(args)
+        calendar_options = calendar_settings(args.config, args.calendar_token, args.calendar_credentials, args.calendar_ids)
         date_str = args.date or datetime.datetime.now(selected["timezone"]).date().isoformat()
         datetime.date.fromisoformat(date_str)
     except (ValueError, OSError, KeyError) as exc:
@@ -116,6 +121,8 @@ def run():
     # Step 1: Collect Git commits
     print(f">> [1/6] Collecting Git commits for {date_str}...")
     git_cmd = [sys.executable, str(scripts_dir / "get_git_activity.py"), "--date", date_str, "--envelope", *common]
+    git_cmd += ["--max-local-commits", str(args.max_local_commits)]
+    git_cmd += ["--max-remote-commits", str(args.max_remote_commits)]
     git_result = run_source_collector(git_cmd, "git", "live")
     commits_data = git_result["items"]
 
@@ -132,6 +139,8 @@ def run():
                "--timezone", selected["timezone_name"]]
     if args.config:
         cal_cmd += ["--config", args.config]
+    cal_cmd += ["--calendar-token", calendar_options["token_path"], "--calendar-credentials", calendar_options["credentials_path"],
+                "--calendar-ids", *calendar_options["calendar_ids"]]
     if args.calendar_fixture:
         cal_cmd += ["--fixture", args.calendar_fixture]
     cal_result = run_source_collector(cal_cmd, "google_calendar", "fixture" if args.calendar_fixture is not None else "live")
