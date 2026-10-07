@@ -61,7 +61,7 @@ class TestDeliveryFlow(unittest.TestCase):
         response=self.cli('run_pipeline.py',*arguments); self.assertEqual(response.returncode,0,response.stderr)
         self.assertEqual({p:p.read_bytes() for p in before},before)
         transcript=self.directory/'synthetic-session.jsonl'
-        usage={'timestamp':'2026-10-07T10:01:00+07:00','message':{'id':'synthetic-msg','usage':{'input_tokens':100,'output_tokens':20,'cache_read_input_tokens':5}}}
+        usage={'timestamp':'2026-10-07T10:01:00+07:00','message':{'id':'synthetic-msg','usage':{'input_tokens':100,'output_tokens':20,'cache_read_input_tokens':5,'cache_creation_input_tokens':0}}}
         transcript.write_text(json.dumps(usage)+'\n'+json.dumps(usage)+'\n')
         manifest=self.directory/'synthetic-usage.json'; manifest.write_text(json.dumps({'run_id':frozen['run_id'],'target_date':'2026-10-07','session_file':str(transcript),'started_at':'2026-10-07T10:00:00+07:00','ended_at':'2026-10-07T10:02:00+07:00','message_ids':['synthetic-msg']}))
         csv_path=self.directory/'synthetic-tokens.csv'

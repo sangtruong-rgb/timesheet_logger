@@ -66,9 +66,12 @@ frozen snapshot; a changed snapshot needs new judgment/review.
 
 The collector requires a marked run manifest, not an implicit ~/.claude scan.
 Message IDs isolate relevant usage if other work occurred in the marked window.
-Latest usage snapshot per identified message replaces repeats; unidentifiable
-legacy records only deduplicate exact snapshots. Malformed lines retain valid
-records with diagnostics. Run totals follow execution-start day; historical target
+Latest complete usage snapshot per identified message replaces repeats;
+unidentifiable legacy records only deduplicate exact snapshots. All four counts
+(input, output, cache-read, cache-creation) must be explicit. Sparse/invalid usage
+in scope and malformed JSON block recording before writes; no missing value is
+assumed zero and no partial-update merge is inferred. Raw streaming is unsupported.
+See [R04 schema policy](docs/r04-usage-schema-validation.md). Run totals follow execution-start day; historical target
 date remains separate. Daily reports sum distinct run records on that execution day.
 Manual recording requires a stable run ID and cumulative totals labeled self-reported.
 No available evidence means unknown, leaves CSV untouched and does not establish zero.

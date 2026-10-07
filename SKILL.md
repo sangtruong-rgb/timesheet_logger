@@ -65,6 +65,10 @@ print or commit credentials/token contents. Do not edit Calendar or infer attend
      --csv-path "${CLAUDE_SKILL_DIR}/data/audit/RUN/token-usage.csv"
    ```
 
+   Use complete snapshots with explicit input, output, cache-read and cache-creation
+   counts. Missing/invalid usage blocks recording; do not fill missing counts with
+   zero or merge partial snapshots. Raw streaming events require a verified adapter
+   and are currently unsupported. See docs/r04-usage-schema-validation.md.
    No transcript/boundary evidence means usage unknown, not zero. Selected-message
    usage is labeled as selected scope; don't claim full-run totals. Manual counts
    are cumulative per run and explicitly self-reported. Daily aggregation follows

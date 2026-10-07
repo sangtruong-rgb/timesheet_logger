@@ -165,9 +165,13 @@ Pass --usage-run-manifest and --token-csv-path to assemble to record already ava
 usage together with timesheets. To include later final responses, record afterward.
 A marked window must accurately isolate the skill; use explicit IDs when unrelated
 messages share it. Selected-message scope is labeled accordingly. Repeated message
-snapshots use latest usage, exact unidentifiable snapshots are deduplicated, malformed
-lines preserve valid records with diagnostics. Real transcript compatibility still
-needs V01 acceptance on an installed Claude Code environment.
+snapshots use the latest complete usage snapshot; exact unidentifiable snapshots
+are deduplicated. Input, output, cache-read and cache-creation must all be explicit;
+missing counts never become zero. In-scope incomplete/invalid usage, conflicting
+snapshots or malformed JSON block recording and preserve existing files. Raw
+streaming events are unsupported; no partial-update merge is inferred. See the
+[R04 schema policy](docs/r04-usage-schema-validation.md). Real transcript
+compatibility still needs V01 acceptance on an installed Claude Code environment.
 
 CSV retains input/output/cache and total including cache (D06). Usage follows execution
 start day, with target timesheet day separately recorded; same run cumulative totals
