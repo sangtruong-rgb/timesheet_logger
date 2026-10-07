@@ -19,6 +19,7 @@ Flow:
 import argparse
 import datetime
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -26,6 +27,50 @@ from pathlib import Path
 from collection_result import collection_result, source_metadata
 from activity_settings import add_settings_arguments, settings_from_args
 from calendar_settings import add_calendar_arguments, calendar_settings
+from output_paths import validate_auxiliary_output, OutputPathError
+
+
+def protected_input_paths(args):
+    """Protect configured input/store paths without requiring valid source setup."""
+    root = Path(__file__).resolve().parent.parent
+    paths = [root / "token.json", root / "credentials.json", root / "data/token-usage.csv"]
+    for name in ("snapshot", "ai_output", "config", "prs_fixture", "calendar_fixture",
+                 "calendar_token", "calendar_credentials", "usage_run_manifest", "token_csv_path"):
+        value = getattr(args, name, None)
+        if value:
+            paths.append(value)
+    for name in ("GOOGLE_CALENDAR_TOKEN", "GOOGLE_CALENDAR_CREDENTIALS", "TIMESHEET_TOKEN_CSV"):
+        if os.environ.get(name):
+            paths.append(Path(os.environ[name]).expanduser())
+    profile = Path(args.config) if args.config else root / "config/user-config.json"
+    paths.append(profile)
+    try:
+        data = json.loads(profile.read_text(encoding="utf-8"))
+        for section, fields in (("calendar", ("token_path", "google_token_path", "credentials_path", "google_credentials_path")),
+                                ("token_tracking", ("csv_path",))):
+            settings = data.get(section, {})
+            if isinstance(settings, dict):
+                for field in fields:
+                    value = settings.get(field)
+                    if isinstance(value, str) and value.strip():
+                        path = Path(value).expanduser()
+                        paths.append(path if path.is_absolute() else profile.resolve().parent / path)
+    except (OSError, ValueError, AttributeError):
+        pass  # Assembly may intentionally ignore unavailable source configuration.
+    manifest = getattr(args, "usage_run_manifest", None)
+    if manifest:
+        try:
+            value = json.loads(Path(manifest).read_text(encoding="utf-8")).get("session_file")
+            if isinstance(value, str) and value:
+                path = Path(value).expanduser()
+                paths.append(path if path.is_absolute() else Path(manifest).resolve().parent / path)
+        except (OSError, ValueError, AttributeError):
+            pass  # Token attribution validates malformed manifests separately.
+    return paths
+
+
+def check_ai_export(args, path):
+    validate_auxiliary_output(path, protected_paths=protected_input_paths(args))
 
 
 def run_source_collector(command, source, mode):
@@ -107,6 +152,12 @@ def run():
     parser.add_argument("--output-dir", type=str, default="data/timesheets", help="Timesheet output directory")
 
     args = parser.parse_args()
+    if args.export_ai_input:
+        try:
+            check_ai_export(args, args.export_ai_input)
+        except (OutputPathError, OSError) as exc:
+            print(f" OUTPUT PATH BLOCKED: {exc}; final files were not written.", file=sys.stderr)
+            return 2
     if args.phase == "assemble":
         if not args.snapshot:
             parser.error("assemble requires --snapshot; source collection is never repeated")
@@ -229,6 +280,8 @@ def assemble_activity(args, date_str, normalized, collection, output_dir, *, fro
             ai_export = Path(args.export_ai_input) if args.export_ai_input else None
             if ai_export and demo:
                 ai_export = ai_export.parent / "demo" / ai_export.name
+            if ai_export:
+                check_ai_export(args, ai_export)
             snapshot = save_snapshot(snapshot_path, normalized, collection, blocks, unassigned_activity, ai_payload, ai_export)
             print(f" PREPARED immutable snapshot: {snapshot_path}")
             print(f" Run ID: {snapshot['run_id']}; no final timesheet or token file written.")
@@ -253,6 +306,11 @@ def assemble_activity(args, date_str, normalized, collection, output_dir, *, fro
         ai_path = Path(args.export_ai_input)
         if demo:
             ai_path = ai_path.parent / "demo" / ai_path.name
+        try:
+            check_ai_export(args, ai_path)
+        except (OutputPathError, OSError) as exc:
+            print(f" OUTPUT PATH BLOCKED: {exc}; final files were not written.", file=sys.stderr)
+            return 2
         extra_files[ai_path] = ai_payload_json
     try:
         save_result = save_timesheet(entries, str(output_dir), target_date=date_str,

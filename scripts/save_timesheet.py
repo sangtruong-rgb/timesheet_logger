@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import List, Dict, Any, Tuple
 from activity_review import REASONS, validate_unassigned_activity, unpack_activity_snapshot
 from atomic_storage import StorageError, directory_lock, write_bundle
+from output_paths import validate_auxiliary_output, OutputPathError
 
 
 class TimesheetReconciliationError(ValueError):
@@ -303,11 +304,13 @@ def validate_calendar_context(context, target_date):
 def save_timesheet(entries, output_dir="data/timesheets", *, target_date, collection_status, calendar_context=None,
                    unassigned_activity=None, collection_manifest=None, extra_files=None):
     try:
+        for path in (extra_files or {}):
+            validate_auxiliary_output(path)
         with directory_lock(output_dir, extra_paths=(extra_files or {})):
             return _save_timesheet(entries, output_dir, target_date=target_date, collection_status=collection_status,
                 calendar_context=calendar_context, unassigned_activity=unassigned_activity,
                 collection_manifest=collection_manifest, extra_files=extra_files)
-    except (StorageError, OSError) as exc:
+    except (OutputPathError, StorageError, OSError) as exc:
         raise TimesheetReconciliationError(str(exc)) from exc
 
 
@@ -378,8 +381,8 @@ def _save_timesheet(entries, output_dir="data/timesheets", *, target_date, colle
     md_content = render_markdown(target_date, merged, collection_status, context, unassigned)
     reserved = {json_file.resolve(), md_file.resolve(), context_file.resolve(), review_file.resolve(),
                 (dir_path / f"{target_date}.collection.json").resolve()}
-    if any(Path(p).resolve() in reserved for p in (extra_files or {})):
-        raise TimesheetReconciliationError("AI export cannot overwrite a timesheet or audit sidecar")
+    for path in (extra_files or {}):
+        validate_auxiliary_output(path, protected_paths=reserved)
     contents = dict(extra_files or {})
     if merged != existing or not json_file.exists():
         contents[json_file] = json_content
