@@ -1,0 +1,4 @@
+interface:
+  display_name: "Personal Timesheet"
+  short_description: "Check and submit evidence-backed daily work logs"
+  default_prompt: "Use $personal-timesheet to check and log today's work from live GitHub and Google Calendar data."
