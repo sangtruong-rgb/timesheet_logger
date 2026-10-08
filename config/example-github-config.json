@@ -5,6 +5,7 @@
   },
   "repositories": ["owner/repository"],
   "timezone": "Asia/Ho_Chi_Minh",
+  "block_policy": {"strategy": "commit_intervals"},
   "github": {
     "users": ["your-github-login", "your-other-github-login"],
     "use_git_credentials": false

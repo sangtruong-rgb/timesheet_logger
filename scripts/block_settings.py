@@ -5,6 +5,7 @@ from activity_settings import load_config
 
 LEGACY_STRATEGY = "legacy_workday_windows"
 CLUSTER_STRATEGY = "activity_clusters"
+COMMIT_STRATEGY = "commit_intervals"
 DEFAULT_CLUSTER_POLICY = {
     "strategy": CLUSTER_STRATEGY,
     "inactivity_gap_minutes": 45,
@@ -16,12 +17,16 @@ DEFAULT_CLUSTER_POLICY = {
 def _validate_policy(value, namespace="block_policy"):
     if not isinstance(value, dict):
         raise ValueError(f"{namespace} must be an object")
+    if value.get("strategy") == COMMIT_STRATEGY:
+        if set(value) != {"strategy"}:
+            raise ValueError(f"{namespace}: commit_intervals only accepts strategy; daily confirmed hours are separate")
+        return {"strategy": COMMIT_STRATEGY}
     unknown = set(value) - set(DEFAULT_CLUSTER_POLICY)
     if unknown:
         raise ValueError(f"Unsupported {namespace} fields: {', '.join(sorted(unknown))}")
     policy = {**DEFAULT_CLUSTER_POLICY, **value}
     if policy["strategy"] not in (LEGACY_STRATEGY, CLUSTER_STRATEGY):
-        raise ValueError(f"{namespace}.strategy must be activity_clusters or legacy_workday_windows")
+        raise ValueError(f"{namespace}.strategy must be commit_intervals, activity_clusters or legacy_workday_windows")
     for key in ("inactivity_gap_minutes", "minimum_block_minutes", "maximum_block_minutes"):
         item = policy[key]
         if not isinstance(item, int) or isinstance(item, bool) or item < 1:

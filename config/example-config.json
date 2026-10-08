@@ -26,10 +26,7 @@
     "credentials_path": "../credentials.json"
   },
   "block_policy": {
-    "strategy": "activity_clusters",
-    "inactivity_gap_minutes": 45,
-    "minimum_block_minutes": 30,
-    "maximum_block_minutes": 90
+    "strategy": "commit_intervals"
   },
   "token_tracking": {
     "claude_dir": "~/.claude",

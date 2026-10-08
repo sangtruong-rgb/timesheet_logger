@@ -9,7 +9,7 @@ blocks and never computes time, attendance, PR suffixes or storage ownership.
 | Collect | Script | Bounded Git author history, GitHub PR actions, paginated readonly Google Calendar; explicit source states |
 | Gate | Script | Failed/unavailable source → INCOMPLETE draft and exit 2; no sample substitution; explicit fixtures → DEMO |
 | Normalize | Script | Qualified identities, source schema, local-day conversion, dedup, retained invalid/unmatched timestamps |
-| Blocks | Script | Daily Calendar clipping/overlap union, all-day context excluded, bounded activity clusters for estimated development, unassigned evidence retained |
+| Blocks | Script | Confirmed daily start → closing commits, subtract lunch/Calendar; optional confirmed end; old snapshot policies preserved; unassigned evidence retained |
 | Prepare | Script | Deduplicated eligible text, ticket ID extraction only, exact byte limit, immutable snapshot and fingerprint/run ID; no final writes |
 | Summarize | AI, optional | Keyed concise descriptions for provided blocks; omit PR references; do not attach unmatched evidence |
 | Assemble | Script | Validate/rebuild same snapshot without recollection; keyed AI or per-block fallback; exactly one qualified PR suffix |
@@ -41,11 +41,18 @@ D05: generated daily set is replaced on successful rerun. Preserve explicit manu
 and override ownership; exact override suppresses an automatic interval, conflicting
 intervals block. Legacy rows without provenance require classification, not deletion.
 
-D02 remains deferred. Hardcoded development windows: 09:00–12:00 / 13:30–17:30;
-lunch subtraction 12:00–13:30. An explicit activity-cluster policy controls idle,
-minimum and maximum development block lengths, but every inferred boundary still
-requires review. Scheduled meetings remain whole during lunch/outside hours. No
-BREAK/OT classification or configured working schedule.
+D02: `commit_intervals` requires a per-day confirmed `--work-start`, with optional
+`--work-end`. Allocate start → first commit, then commit → commit; subtract lunch
+12:00–13:30 and scheduled Calendar coverage. No mid-session break input, idle split,
+minimum duration or maximum duration. No end confirmation means stop at the last
+commit. Confirmations are frozen with the evidence and cannot be changed in assemble.
+Commit boundaries are minute-floored; simultaneous commits share an interval. Each
+closing commit provides completion context for all split pieces of its interval.
+PRs attach by timestamp without creating time. Development remains estimated;
+continuous work between boundaries is an explicit allocation assumption. Scheduled
+meetings remain whole during lunch/outside hours, attendance unconfirmed.
+Older activity-cluster/legacy snapshots retain their original behavior. Recurring
+schedule configuration and BREAK/OT classification remain unsupported.
 
 ## Token Budget
 

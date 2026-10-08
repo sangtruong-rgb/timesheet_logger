@@ -145,6 +145,8 @@ def _run():
     parser.add_argument("--repos", nargs="+", default=None, help="Repositories shared by Git and PR collection")
     parser.add_argument("--max-local-commits", type=int, default=10000)
     parser.add_argument("--max-remote-commits", type=int, default=10000)
+    parser.add_argument("--work-start", help="Confirmed start HH:MM for the target day; selects commit_intervals")
+    parser.add_argument("--work-end", help="Optional confirmed end HH:MM (or 24:00); requires --work-start")
     add_settings_arguments(parser)
     add_calendar_arguments(parser)
     parser.add_argument("--calendar-fixture", type=str, default=None, help="Explicit Calendar demo/test fixture")
@@ -164,6 +166,8 @@ def _run():
             print(f" OUTPUT PATH BLOCKED: {exc}; final files were not written.", file=sys.stderr)
             return 2
     if args.phase == "assemble":
+        if args.work_start is not None or args.work_end is not None:
+            parser.error("assemble uses frozen confirmed hours; prepare a new snapshot to change them")
         if not args.snapshot:
             parser.error("assemble requires --snapshot; source collection is never repeated")
         try:
@@ -185,10 +189,15 @@ def _run():
     try:
         selected = settings_from_args(args)
         calendar_options = calendar_settings(args.config, args.calendar_token, args.calendar_credentials, args.calendar_ids)
-        from block_settings import block_policy_settings
+        from block_settings import block_policy_settings, COMMIT_STRATEGY
         block_policy = block_policy_settings(args.config)
         date_str = args.date or datetime.datetime.now(selected["timezone"]).date().isoformat()
         datetime.date.fromisoformat(date_str)
+        confirmation = None
+        if args.work_start is not None or args.work_end is not None or (block_policy or {}).get("strategy") == COMMIT_STRATEGY:
+            from commit_intervals import work_confirmation
+            confirmation = work_confirmation(date_str, args.work_start, args.work_end)
+            block_policy = {"strategy": COMMIT_STRATEGY}
     except (ValueError, OSError, KeyError) as exc:
         parser.error(str(exc))
     scripts_dir = Path(__file__).resolve().parent
@@ -250,6 +259,8 @@ def _run():
             # Freeze the policy with the evidence so later assembly never depends
             # on mutable host configuration.
             normalized["block_policy"] = block_policy
+        if confirmation is not None:
+            normalized["work_confirmation"] = confirmation
     except ActivityNormalizationError as exc:
         raw = {"date": date_str, "timezone": selected["timezone_name"], "commits": commits_data,
                "pull_requests": pr_result["items"], "calendar": cal_result["items"]}
