@@ -51,10 +51,14 @@ allocations, 20 minutes or more and confirmed-end tails remain separate. No end 
 commit. Confirmations are frozen with the evidence and cannot be changed in assemble.
 Commit boundaries are minute-floored; simultaneous commits share an interval. Each
 closing commit provides completion context for all split pieces of its interval.
-PRs attach by timestamp without creating time. Development remains estimated;
+PRs attach by timestamp without creating time. A same-minute merge with a matching
+qualified commit SHA attaches to its closing allocation, preserving the event time.
+Development remains estimated;
 continuous work between boundaries is an explicit allocation assumption. Scheduled
 meetings remain whole during lunch/outside hours, attendance unconfirmed.
-Snapshot v3 freezes under-20-minute merging; v2 retains under-30-minute merging
+Snapshot v4 freezes allocation group IDs before piece-specific evidence assignment
+and permits proven merge-commit associations. V3 freezes the previous under-20-minute
+behavior; v2 retains under-30-minute merging
 and v1 retains unmerged intervals.
 Older activity-cluster/legacy snapshots retain their original behavior. Recurring
 schedule configuration and BREAK/OT classification remain unsupported.
@@ -79,6 +83,8 @@ extracted. Payload v3 gives pieces of one commit allocation split by lunch/Calen
 one summary job, combining their PR context. The topic stays the same across pieces;
 each row retains its own PR suffix and source evidence. Different allocations keep
 separate jobs. Frozen v1/v2 payloads retain their original semantic deduplication.
+New allocation groups combine commit evidence across pieces even when a commit
+in the start minute is timestamp-assigned to just one row.
 This does not merge timesheet intervals or automatically cluster work by ticket.
 No automatic AI
 cache exists. Validated supplied judgments may be reused explicitly with the same

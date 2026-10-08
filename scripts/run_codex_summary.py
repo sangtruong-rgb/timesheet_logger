@@ -48,6 +48,29 @@ def now():
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
+def record_attempt(directory, manifest, status, timezone):
+    """Persist verifiable invocation cost independently of summary acceptance."""
+    from collect_token_usage import collect_run, update_csv
+    from atomic_storage import atomic_write
+    receipt = {**manifest, 'schema': 'codex_summary_attempt_v1', 'summary_status': status,
+               'session_file': 'events.jsonl', 'usage_status': 'unknown'}
+    events = directory / 'events.jsonl'
+    if events.exists():
+        receipt['session_file_sha256'] = sha256(events)
+    try:
+        thread, usage = completed_usage(events)
+        receipt.update(session_id=thread, provider_usage=usage, usage_status='measured')
+    except ValueError as exc:
+        receipt['usage_reason'] = str(exc)
+    path = directory / 'usage-attempt.json'
+    atomic_write(path, json.dumps(receipt, indent=2))
+    if receipt['usage_status'] == 'measured':
+        from activity_settings import resolve_timezone
+        record = collect_run(path, resolve_timezone(timezone, allow_legacy_offset=True))
+        update_csv(directory / 'attempt-token-usage.csv', [record])
+    return receipt
+
+
 def run_summary(snapshot_path, run_dir, *, codex='codex', timeout=300, model=None,
                 reasoning_effort='low', strategy='compact'):
     snapshot_path = Path(snapshot_path).resolve()
@@ -113,11 +136,19 @@ def run_summary(snapshot_path, run_dir, *, codex='codex', timeout=300, model=Non
         except (OSError, subprocess.TimeoutExpired, subprocess.CalledProcessError) as exc:
             manifest.update(ended_at=now(), process_exit_code=None, failure=type(exc).__name__)
             (directory / 'failed-run.json').write_text(json.dumps(manifest, indent=2))
-            raise ValueError('Codex launch/timeout failed; evidence retained, no attributed usage') from exc
+            # Flush captured events before measuring a timeout/completed attempt.
+            out.flush()
+            record_attempt(directory, manifest, 'process_failed', snapshot['normalized']['timezone'])
+            raise ValueError('Codex launch/timeout failed; attempt evidence retained') from exc
     manifest.update(ended_at=now(), process_exit_code=result.returncode)
     (directory / 'process-result.json').write_text(json.dumps(manifest, indent=2))
+    receipt = record_attempt(directory, manifest,
+                             'process_failed' if result.returncode != 0 else 'completed_unvalidated',
+                             snapshot['normalized']['timezone'])
     if result.returncode != 0: raise ValueError('Codex process failed; inspect isolated stderr.log')
-    thread, usage = completed_usage(directory / 'events.jsonl')
+    if receipt['usage_status'] != 'measured':
+        raise ValueError('Codex usage is unknown; inspect usage-attempt.json')
+    thread, usage = receipt['session_id'], receipt['provider_usage']
     try:
         raw = json.loads(raw_path.read_text(encoding='utf-8'))
         judgments = raw['judgments']
@@ -128,6 +159,7 @@ def run_summary(snapshot_path, run_dir, *, codex='codex', timeout=300, model=Non
         if {v['block_id'] for v in judgments} != {b['block_id'] for b in blocks}:
             raise ValueError('Codex output does not cover eligible blocks')
     except (OSError, ValueError, KeyError, TypeError) as exc:
+        record_attempt(directory, manifest, 'summary_invalid', snapshot['normalized']['timezone'])
         raise ValueError('Codex summary is invalid; no success manifest published') from exc
     output = directory / 'ai-output.json'
     output.write_text(json.dumps(judgments, ensure_ascii=False, indent=2), encoding='utf-8')
@@ -139,10 +171,12 @@ def run_summary(snapshot_path, run_dir, *, codex='codex', timeout=300, model=Non
         raise ValueError('Snapshot changed during Codex execution; no success manifest published')
     manifest_path = directory / 'usage-run.json'
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding='utf-8')
+    record_attempt(directory, manifest, 'success', snapshot['normalized']['timezone'])
     return {'run_id': snapshot['run_id'], 'session_id': thread, 'provider_usage': usage,
             'ai_output': str(output), 'usage_run_manifest': str(manifest_path),
             'summary_strategy': strategy, 'eligible_blocks': len(blocks),
             'summary_jobs': len(ids), 'prompt_bytes': len(prompt.encode('utf-8')),
+            'usage_attempt_manifest': str(directory / 'usage-attempt.json'),
             'cli_version': manifest['cli_version'], 'model_requested': model,
             'scope': 'Codex summary invocation, not the surrounding chat or Python pipeline'}
 

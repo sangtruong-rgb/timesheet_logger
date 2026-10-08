@@ -121,15 +121,16 @@ class TestCommitIntervals(unittest.TestCase):
     def test_snapshots_freeze_unmerged_30_and_20_minute_rules(self):
         activity = model([commit('10:00', 'a'), commit('10:29', 'b')])
         with tempfile.TemporaryDirectory() as directory:
-            for version in (1, 2, 3):
+            for version in (1, 2, 3, 4):
                 review = []
                 blocks = build_time_blocks(activity, unassigned_activity=review, merge_short_commits=version >= 2,
-                                           short_commit_merge_minutes=30 if version == 2 else 20)
+                                           short_commit_merge_minutes=30 if version == 2 else 20,
+                                           commit_allocation_version=2 if version >= 4 else 1)
                 payload = prepare_activity_input(blocks, review)
                 path = Path(directory) / f'v{version}.json'
                 frozen = save_snapshot(path, activity, {'status': 'complete'}, blocks, review, payload)
-                self.assertEqual(frozen['schema_version'], 3)
-                if version != 3:
+                self.assertEqual(frozen['schema_version'], 4)
+                if version != 4:
                     frozen['schema_version'] = version
                     frozen['fingerprint'] = fingerprint({k: v for k, v in frozen.items() if k != 'fingerprint'})
                     path.write_text(json.dumps(frozen))
@@ -143,7 +144,7 @@ class TestCommitIntervals(unittest.TestCase):
 
     def test_identical_v1_snapshot_can_be_resaved_without_rewriting_history(self):
         activity = model([commit('10:00')])
-        blocks = build_time_blocks(activity)
+        blocks = build_time_blocks(activity, commit_allocation_version=1)
         payload = prepare_activity_input(blocks, [])
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'snapshot.json'
@@ -190,6 +191,59 @@ class TestCommitIntervals(unittest.TestCase):
         self.assertEqual(intervals(blocks), [("09:00", "10:00", 60), ("10:00", "11:00", 60)])
         self.assertEqual([[p["id"] for p in b["prs"]] for b in blocks], [[1], [2]])
         self.assertEqual([r["activity"]["id"] for r in review], [3])
+
+    def test_boundary_merge_links_matching_commit_without_extending_time(self):
+        closing = commit('16:07', 'merge')
+        closing['timestamp'] = closing['timestamp'].replace('16:07:00', '16:07:19')
+        action = {**pr('16:07', 66), 'status': 'merged', 'merge_commit_sha': 'merge'}
+        action['timestamp'] = action['timestamp'].replace('16:07:00', '16:07:20')
+        review = []
+        blocks = build_time_blocks(model([closing], prs=[action]), unassigned_activity=review)
+        self.assertEqual(sum(b['duration_minutes'] for b in blocks), 337)
+        self.assertEqual(blocks[-1]['end_time'], '16:07')
+        self.assertEqual(blocks[-1]['prs'][0]['timestamp'], action['timestamp'])
+        self.assertEqual(blocks[-1]['prs'][0]['assignment']['basis'], 'matching_merge_commit')
+        self.assertEqual([len(b['prs']) for b in blocks], [0, 1])
+        self.assertEqual(review, [])
+        self.assertNotIn('assignment', action)
+        historical = []
+        build_time_blocks(model([closing], prs=[action]), unassigned_activity=historical, commit_allocation_version=1)
+        self.assertEqual(historical[0]['activity'], action)
+
+    def test_merge_link_requires_sha_repository_minute_and_confirmed_hours(self):
+        closing = commit('16:07', 'merge')
+        closing['timestamp'] = closing['timestamp'].replace('16:07:00', '16:07:19')
+        base = {**pr('16:07', 66), 'status': 'merged', 'merge_commit_sha': 'merge'}
+        base['timestamp'] = base['timestamp'].replace('16:07:00', '16:07:20')
+        for change in ({'merge_commit_sha': 'other'}, {'merge_commit_sha': None},
+                       {'repository': 'other/project'}, {'status': 'opened'},
+                       {'timestamp': base['timestamp'].replace('16:07', '16:08')}):
+            review = []
+            build_time_blocks(model([closing], prs=[{**base, **change}]), unassigned_activity=review)
+            self.assertEqual(len(review), 1, change)
+        review = []
+        build_time_blocks(model([closing], prs=[base], end='16:07'), unassigned_activity=review)
+        self.assertEqual({r['source'] for r in review}, {'git', 'github'})
+
+    def test_intermediate_merge_uses_closing_group_and_preserves_other_events(self):
+        closing = commit('10:00', 'merge')
+        closing['timestamp'] = closing['timestamp'].replace('10:00:00', '10:00:19')
+        reference = {**pr('10:00', 66), 'status': 'merged', 'merge_commit_sha': 'merge',
+                     'events': [{'action': 'opened', 'timestamp': pr('09:45', 66)['timestamp']},
+                                {'action': 'merged', 'timestamp': pr('10:00', 66)['timestamp'].replace('10:00:00', '10:00:20')}]}
+        blocks = build_time_blocks(model([closing, commit('11:00', 'next')], prs=[reference]))
+        self.assertEqual([len(b['prs']) for b in blocks], [1, 0])
+        self.assertEqual([e['action'] for e in blocks[0]['prs'][0]['events']], ['opened', 'merged'])
+        self.assertEqual(blocks[0]['prs'][0]['events'][1]['assignment']['basis'], 'matching_merge_commit')
+
+    def test_merged_short_allocation_and_lunch_use_last_piece_for_merge(self):
+        closing = commit('13:39', 'merge')
+        closing['timestamp'] = closing['timestamp'].replace('13:39:00', '13:39:19')
+        action = {**pr('13:39', 66), 'status': 'merged', 'merge_commit_sha': 'merge'}
+        action['timestamp'] = action['timestamp'].replace('13:39:00', '13:39:20')
+        blocks = build_time_blocks(model([commit('11:50', 'before'), closing], prs=[action], start='11:00'))
+        self.assertEqual(intervals(blocks), [('11:00', '12:00', 60), ('13:30', '13:39', 9)])
+        self.assertEqual([len(b['prs']) for b in blocks], [0, 1])
 
     def test_same_minute_commits_group_and_raw_seconds_are_preserved(self):
         a, b = commit("10:00", "a"), commit("10:00", "b")
@@ -298,7 +352,7 @@ class TestPipelineCommitIntervals(unittest.TestCase):
         self.activities = [commit('10:00', 'a'), commit('10:10', 'b'), commit('10:25', 'c')]
         self.assertEqual(self.invoke('--phase', 'prepare', '--snapshot', str(self.snapshot), '--work-start', '09:00'), (0, 3))
         frozen = read_snapshot(self.snapshot)
-        self.assertEqual(frozen['schema_version'], 3)
+        self.assertEqual(frozen['schema_version'], 4)
         self.assertEqual(intervals(frozen['blocks']), [('09:00', '10:25', 85)])
         self.assertEqual(len(frozen['ai_input']['summary_request']['jobs']), 1)
         self.assertEqual(self.invoke('--phase', 'assemble', '--snapshot', str(self.snapshot)), (0, 0))

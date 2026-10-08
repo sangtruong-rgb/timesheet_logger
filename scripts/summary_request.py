@@ -7,6 +7,13 @@ def serialize_request(request):
     return json.dumps(request, ensure_ascii=False, separators=(',', ':'))
 
 
+def allocation_group_id(date, timezone, allocation):
+    identity = {'date': date, 'timezone': timezone,
+                'allocation': {k: v for k, v in allocation.items() if k != 'summary_group_id'}}
+    data = json.dumps(identity, sort_keys=True, ensure_ascii=False, separators=(',', ':'))
+    return 'cg:' + hashlib.sha256(data.encode('utf-8')).hexdigest()
+
+
 def commit_summary_group_id(block):
     """Identify pieces of one allocation, without merging different work groups."""
     allocation = block.get('allocation', {})
@@ -17,6 +24,11 @@ def commit_summary_group_id(block):
             or policy.get('strategy') != 'commit_intervals'
             or allocation.get('basis') != 'ending_commit' or not block.get('commits')):
         return None
+    if 'summary_group_id' in allocation:
+        expected = allocation_group_id(block['date'], block.get('timezone'), allocation)
+        if allocation['summary_group_id'] != expected:
+            raise ValueError('Allocation summary group conflicts with its identity')
+        return expected
     evidence = []
     for commit in block['commits']:
         if any(not isinstance(commit.get(key), str) or not commit[key] for key in ('repository', 'hash')):

@@ -178,7 +178,13 @@ def shared_group_descriptions(block_by_id, ai_by_key, groups):
                 raise AIJudgmentError('Pieces of one commit allocation require one shared AI description')
             description, from_ai = matches[0]['description'].strip(), True
         else:
+            commits = []
+            for key in keys:
+                for commit in block_by_id[key].get('commits', []):
+                    if commit not in commits:
+                        commits.append(commit)
             combined = {**block_by_id[keys[0]],
+                        'commits': commits,
                         'prs': [p for key in keys for p in block_by_id[key].get('prs', [])]}
             description, from_ai = synthesize_deterministic_summary(combined), False
         for key in keys:

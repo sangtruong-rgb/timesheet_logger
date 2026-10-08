@@ -167,7 +167,10 @@ clock overrides. Changed hours require a new snapshot.
   piece, including a piece ending before lunch/a meeting. JSON `allocation` records
   this relationship; the commit need not lie inside each piece. Do not count these
   repeated source references as extra commits or extra time.
-- PR actions attach by [start,end) timestamp only and never create more time.
+- PR actions normally attach by [start,end) timestamp and never create more time.
+  A merge event in the same minute as a closing commit can instead attach to that
+  allocation's last work piece when its merge SHA and repository match. Keep the
+  original event timestamp and record the association; never extend confirmed hours.
   Events outside available intervals remain in review. Commits outside confirmed
   hours do not extend development time. A commit exactly at start adds no time.
 - With no commits and no confirmed end, generate only Calendar rows. With both
@@ -180,8 +183,9 @@ Example: start 09:00, commits 10:10 / 11:40 / 14:10 / 16:00, no Calendar:
 Confirmed hours and allocation metadata survive into the final JSON. Development
 remains `estimated`: commit boundaries allocate time, not measure task duration.
 For example, commits at 10:00 / 10:10 / 10:25 become one 09:00–10:25 row (85m),
-containing all three commits. New snapshots use schema v3 to freeze the under-20-minute
-rule; v2 snapshots retain under-30-minute merging and v1 retains unmerged intervals. Changed allocations require
+containing all three commits. New snapshots use schema v4 to freeze stable allocation
+groups and merge-commit associations. V3 retains the previous under-20-minute rule;
+v2 retains under-30-minute merging and v1 retains unmerged intervals. Changed allocations require
 a new prepare snapshot.
 
 ### Previous policies and source scope
@@ -232,9 +236,18 @@ lunch/Calendar share one job and description, using the combined PR context of
 those pieces. Different commit allocations keep separate jobs even when their text
 matches. Python maps jobs back to the original block IDs and appends each block's
 own PR references. Frozen v1/v2 payloads retain their original summary behavior.
+New allocation IDs are fixed before assigning per-piece evidence, so a commit in
+the first minute of the confirmed start cannot accidentally split a summary group.
 Times, source evidence
 and unassigned review stay in the snapshot. Calendar-only rows use deterministic
 descriptions. No persistent judgment cache is implemented.
+
+The runner writes `usage-attempt.json` independently of summary acceptance and a
+per-invocation `attempt-token-usage.csv` when provider usage is verifiable. Invalid
+summaries still retain their token cost; missing usage is unknown. Successful output
+keeps a separate `usage-run.json` for assembly. Both receipts identify the same
+invocation, so collecting them does not count its tokens twice. Benchmarks retain
+an `attempts.json` ledger for failures/retries as well as successful comparisons.
 
 `serialized_bytes` measures the full audit export; `model_payload_bytes` measures
 the exact compact UTF-8 request. The bytes/4 estimate is a heuristic for the request,

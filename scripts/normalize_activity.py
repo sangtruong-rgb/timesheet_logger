@@ -97,7 +97,7 @@ def clean_prs(raw_prs):
             _fail("github", index, "PR identity requires a positive integer id")
         record = {"id": pr["id"], "repository": _text(pr, "repository", "github", index),
                   "title": _text(pr, "title", "github", index)}
-        for field in ("url", "original_timestamp"):
+        for field in ("url", "original_timestamp", "merge_commit_sha"):
             if field in pr:
                 record[field] = _text(pr, field, "github", index)
         for field in ("status", "timestamp", "actor"):

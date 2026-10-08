@@ -125,7 +125,8 @@ def activity_cluster_bounds(start, end, activities, policy):
 
 def build_time_blocks(normalized_data: Dict[str, Any], *, unassigned_activity=None,
                       merge_short_commits=True,
-                      short_commit_merge_minutes=SHORT_COMMIT_MERGE_MINUTES) -> List[Dict[str, Any]]:
+                      short_commit_merge_minutes=SHORT_COMMIT_MERGE_MINUTES,
+                      commit_allocation_version=2) -> List[Dict[str, Any]]:
     """Build timed proposals; callers persisting evidence must collect unassigned_activity."""
     if unassigned_activity is not None:
         from copy import deepcopy
@@ -150,7 +151,8 @@ def build_time_blocks(normalized_data: Dict[str, Any], *, unassigned_activity=No
         from commit_intervals import build_commit_intervals
         return build_commit_intervals(normalized_data, target_date, tz, unassigned_activity,
                                       merge_short_commits=merge_short_commits,
-                                      short_commit_merge_minutes=short_commit_merge_minutes)
+                                      short_commit_merge_minutes=short_commit_merge_minutes,
+                                      allocation_version=commit_allocation_version)
 
     calendar = [ev for ev in normalized_data.get("calendar", [])
                 if not ev.get("all_day") and not (len(ev.get("start", "")) == 10 and len(ev.get("end", "")) == 10)]

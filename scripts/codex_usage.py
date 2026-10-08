@@ -58,9 +58,17 @@ def collect_codex_run(location, manifest, tz, *, expected_target=None,
                       expected_run=None, expected_ai_output=None):
     from collect_token_usage import make_record
     from build_timesheet import load_ai_judgments, build_entries
-    if manifest.get('schema') not in ('codex_exec_run_v1', 'codex_exec_run_v2'):
+    attempt = manifest.get('schema') == 'codex_summary_attempt_v1'
+    if manifest.get('schema') not in ('codex_exec_run_v1', 'codex_exec_run_v2', 'codex_summary_attempt_v1'):
         raise ValueError('Unsupported Codex run schema')
-    if type(manifest.get('process_exit_code')) is not int or manifest['process_exit_code'] != 0:
+    if attempt:
+        if expected_ai_output is not None:
+            raise ValueError('Attempt usage is separate from validated timesheet output')
+        if manifest.get('usage_status') != 'measured':
+            raise ValueError('Attempt usage is unknown, never zero')
+        if manifest.get('summary_status') not in ('completed_unvalidated', 'success', 'summary_invalid', 'process_failed'):
+            raise ValueError('Unsupported summary attempt status')
+    elif type(manifest.get('process_exit_code')) is not int or manifest['process_exit_code'] != 0:
         raise ValueError('Codex process did not complete successfully')
     run_id, target = manifest.get('run_id'), manifest.get('target_date')
     if not isinstance(run_id, str) or not run_id.strip() or '/' in run_id: raise ValueError('Invalid Codex run_id')
@@ -72,7 +80,7 @@ def collect_codex_run(location, manifest, tz, *, expected_target=None,
                   for k in ('started_at', 'ended_at'))
     if end <= start: raise ValueError('Usage requires a positive marked invocation window')
     paths = {}
-    for key in ('session_file', 'snapshot_file', 'ai_output_file'):
+    for key in ('session_file', 'snapshot_file') + (() if attempt else ('ai_output_file',)):
         value = manifest.get(key)
         if not isinstance(value, str) or not value: raise ValueError('Missing Codex evidence path')
         path = Path(value).expanduser()
@@ -87,18 +95,19 @@ def collect_codex_run(location, manifest, tz, *, expected_target=None,
     if snapshot['collection']['status'] != 'complete': raise ValueError('Codex live usage requires a complete snapshot')
     if fingerprint(snapshot['ai_input']) != manifest.get('ai_input_fingerprint'):
         raise ValueError('Codex input differs from frozen payload')
-    judgments = load_ai_judgments(paths['ai_output_file'])
-    from summary_request import commit_group_mapping
-    groups = commit_group_mapping(snapshot['ai_input']['blocks']) if manifest.get('summary_strategy') != 'legacy' else None
-    build_entries(snapshot['blocks'], judgments, summary_groups=groups)
-    if {v.get('block_id') for v in judgments} != {v['block_id'] for v in snapshot['ai_input']['blocks']}:
-        raise ValueError('Codex output must cover exactly the eligible AI blocks')
-    if manifest['schema'] == 'codex_exec_run_v2':
+    if not attempt:
+        judgments = load_ai_judgments(paths['ai_output_file'])
+        from summary_request import commit_group_mapping
+        groups = commit_group_mapping(snapshot['ai_input']['blocks']) if manifest.get('summary_strategy') != 'legacy' else None
+        build_entries(snapshot['blocks'], judgments, summary_groups=groups)
+        if {v.get('block_id') for v in judgments} != {v['block_id'] for v in snapshot['ai_input']['blocks']}:
+            raise ValueError('Codex output must cover exactly the eligible AI blocks')
+    if manifest['schema'] == 'codex_exec_run_v2' or attempt:
         from run_codex_summary import summary_input, SUMMARY_INSTRUCTIONS
         from summary_request import expand_judgments, serialize_request
         strategy = manifest.get('summary_strategy')
         request, mapping, prompt = summary_input(snapshot, strategy)
-        extra = ('request_file', 'prompt_file', 'schema_file', 'response_file')
+        extra = ('request_file', 'prompt_file', 'schema_file') + (() if attempt else ('response_file',))
         if mapping is not None:
             extra += ('instructions_file',)
         for key in extra:
@@ -115,12 +124,15 @@ def collect_codex_run(location, manifest, tz, *, expected_target=None,
             raise ValueError('Codex transmitted request conflicts with snapshot')
         if mapping is not None and paths['instructions_file'].read_text(encoding='utf-8') != SUMMARY_INSTRUCTIONS:
             raise ValueError('Codex summary instructions differ')
-        raw = json.loads(paths['response_file'].read_text(encoding='utf-8'))['judgments']
-        expanded = expand_judgments(request, mapping, raw) if mapping is not None else raw
-        if expanded != judgments:
-            raise ValueError('Codex job output mapping conflicts with canonical judgments')
+        if not attempt:
+            raw = json.loads(paths['response_file'].read_text(encoding='utf-8'))['judgments']
+            expanded = expand_judgments(request, mapping, raw) if mapping is not None else raw
+            if expanded != judgments:
+                raise ValueError('Codex job output mapping conflicts with canonical judgments')
     thread, usage = completed_usage(paths['session_file'], manifest.get('session_id'))
     if not isinstance(manifest.get('session_id'), str): raise ValueError('Missing Codex session_id')
+    if attempt and usage != manifest.get('provider_usage'):
+        raise ValueError('Attempt usage conflicts with completed provider evidence')
     # Codex input includes cached input. Existing CSV partitions input/cache.
     counts = (usage['input_tokens'] - usage['cached_input_tokens'],
               usage['output_tokens'], usage['cached_input_tokens'])
@@ -134,9 +146,11 @@ def collect_codex_run(location, manifest, tz, *, expected_target=None,
               'total_definition': 'provider input + provider output; cache and reasoning are not added twice',
               'timezone': getattr(tz, 'key', str(tz)),
               'evidence': {k + '_sha256': manifest[k + '_sha256'] for k in paths} }
-    if manifest['schema'] == 'codex_exec_run_v2':
+    if manifest['schema'] == 'codex_exec_run_v2' or attempt:
         notes.update(summary_strategy=manifest['summary_strategy'],
                      model_requested=manifest.get('model_requested'),
                      reasoning_effort=manifest.get('reasoning_effort'), cli_version=manifest.get('cli_version'),
                      request_fingerprint=manifest['request_fingerprint'])
+    if attempt:
+        notes['summary_status'] = manifest['summary_status']
     return make_record(execution_date, f'codex:{thread}/{run_id}', counts, json.dumps(notes, sort_keys=True))

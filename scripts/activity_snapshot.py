@@ -21,7 +21,7 @@ def read_snapshot(path):
     try:
         snapshot = json.loads(Path(path).read_text(encoding="utf-8"))
         if (not isinstance(snapshot, dict) or type(snapshot.get('schema_version')) is not int
-                or snapshot['schema_version'] not in (1, 2, 3)):
+                or snapshot['schema_version'] not in (1, 2, 3, 4)):
             raise ValueError("Unsupported snapshot")
         expected = snapshot["fingerprint"]
         body = {k: v for k, v in snapshot.items() if k != "fingerprint"}
@@ -37,7 +37,8 @@ def read_snapshot(path):
         retained = []
         rebuilt = build_time_blocks(snapshot["normalized"], unassigned_activity=retained,
                                     merge_short_commits=snapshot['schema_version'] >= 2,
-                                    short_commit_merge_minutes=30 if snapshot['schema_version'] == 2 else 20)
+                                    short_commit_merge_minutes=30 if snapshot['schema_version'] == 2 else 20,
+                                    commit_allocation_version=2 if snapshot['schema_version'] >= 4 else 1)
         if rebuilt != snapshot["blocks"] or retained != snapshot["unassigned_activity"]:
             raise ValueError("Snapshot block/source evidence conflicts")
         from prepare_ai_input import prepare_activity_input
@@ -52,8 +53,8 @@ def read_snapshot(path):
 
 def save_snapshot(path, normalized, collection, blocks, unassigned, ai_input, ai_export=None):
     path = Path(path)
-    # v3 freezes <20-minute merging; v2 keeps <30 and v1 keeps unmerged intervals.
-    body = {"schema_version": 3, "normalized": normalized, "collection": collection,
+    # v4 freezes stable groups/merge associations; v1-v3 retain previous allocation.
+    body = {"schema_version": 4, "normalized": normalized, "collection": collection,
             "blocks": blocks, "unassigned_activity": unassigned, "ai_input": ai_input}
     extra = [ai_export] if ai_export else []
     try:

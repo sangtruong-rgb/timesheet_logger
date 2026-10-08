@@ -3,6 +3,10 @@
 Đã triển khai payload và runner gọn cho cách chia `commit_intervals`.
 Trong phép đo này, tổng token AI giảm **64,61%**, từ **19.681 xuống 6.966**.
 
+Phép đo mới sau các bản sửa ngày 09/10 nằm trong
+[báo cáo benchmark lại](followup-benchmark-20261009.md): legacy **19.009**,
+compact **6.182** token trên cùng snapshot theo chính sách hiện tại.
+
 Số đo dưới đây được thực hiện **trước khi bổ sung quy tắc gộp commit dưới 30 phút**.
 Snapshot benchmark v1 vẫn giữ nguyên 23 dòng. Kiểm tra lại cùng dữ liệu bằng Python
 sau cập nhật cho 5 dòng và 4 job mô tả, giữ nguyên tổng 300 phút phân bổ và 40 commit

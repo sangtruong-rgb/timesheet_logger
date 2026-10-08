@@ -4,6 +4,32 @@ This log supersedes the unmeasured claims in improvement-log-legacy.md. That fil
 is a preserved historical artifact; 3,000–8,000 tokens, guaranteed <350 tokens and
 zero-waste results are withdrawn. There was no transcript evidence for those claims.
 
+## 2026-10-09 — stabilize allocation groups, record attempt costs and link boundary merges
+
+Problem: a start-minute commit timestamp-assigned to one piece changed its summary
+group; rejected AI summaries lost collectible usage despite completed provider
+counts; minute-floored closing bounds left same-minute merge events in review.
+
+Change: freeze group identity before splitting/timestamp assignment and union
+commit context for shared fallback/AI summaries. Retain qualified merge SHAs through
+collection/dedup/normalization; associate proven same-minute merges with the final
+piece of their closing group, preserving timestamps/hours. Snapshot v4 freezes the
+new behavior while v1-v3 remain reproducible. Separate verified attempt receipts
+and per-invocation CSV from summary acceptance; benchmark ledgers count rejected
+attempts/retries once, preserve partial-run costs and mark unknown usage explicitly.
+Attempt receipts cannot authorize assembly in place of a validated output manifest.
+
+Validation: 565 tests pass. Replayed live Oct8 evidence with a readonly GitHub SHA
+check for PR66: 4 rows/337 minutes unchanged, merge event assigned, review 1 -> 0.
+Historical 6,966-token provenance still verifies. New benchmark on the same Oct7
+source data with current under-20 allocation: 6 rows/5 compact jobs, 300 minutes,
+40 assigned commits and 9 review events. Same gpt-6.1-sol/low/CLI 0.161.0: legacy
+18,619 input + 390 output = 19,009; compact 5,664 + 518 = 6,182 (-67.48% total,
+-69.58% input). Cached input zero. Two successful calls/no retries consumed 25,191
+tokens in total; one pair is not a statistical average. Reviewed all 5 compact
+descriptions; assembly/rerun and benchmark resume preserve bytes without new AI.
+No publish/log work. See docs/followup-benchmark-20261009.md.
+
 ## 2026-10-08 — share descriptions across pieces of one commit allocation
 
 Problem: lunch/Calendar can split one allocation into rows with different PR

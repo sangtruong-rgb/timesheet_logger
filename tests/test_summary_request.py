@@ -64,6 +64,38 @@ class TestSummaryRequest(unittest.TestCase):
         self.assertEqual(sum(e['entry']['duration_minutes'] for e in entries), 60)
         self.assertEqual(blocks, original)
 
+    def test_commit_in_start_minute_does_not_split_summary_group(self):
+        early = commit('09:00', 'early')
+        early['timestamp'] = early['timestamp'].replace('09:00:00', '09:00:30')
+        for calendar in ([], [event('10:00', '11:00')]):
+            blocks = build_time_blocks(model([early, commit('14:10', 'closing')], calendar))
+            payload = prepare_activity_input(blocks, [])
+            request, mapping = build_summary_request(payload['blocks'])
+            self.assertEqual(len(request['jobs']), 1)
+            self.assertEqual({request['texts'][t] for t in request['jobs'][0]['commits']}, {'work early', 'work closing'})
+            rows = build_entries(blocks, summary_groups=commit_group_mapping(payload['blocks']))
+            work = [r for r in rows if r['time_basis'] == 'estimated']
+            self.assertEqual(len({r['entry']['description'] for r in work}), 1)
+            self.assertEqual([len(r['sources']['commits']) for r in work], [2] + [1] * (len(work) - 1))
+            self.assertEqual(sum(r['entry']['duration_minutes'] for r in rows), 220)
+
+    def test_historical_v3_group_and_allocation_replay_are_preserved(self):
+        early = commit('09:00', 'early')
+        early['timestamp'] = early['timestamp'].replace('09:00:00', '09:00:30')
+        activity = model([early, commit('14:10', 'closing')])
+        blocks = build_time_blocks(activity, commit_allocation_version=1)
+        payload = prepare_activity_input(blocks, [])
+        frozen = save_snapshot(self.snapshot, activity, self.collection, blocks, [], payload)
+        frozen['schema_version'] = 3
+        frozen['fingerprint'] = fingerprint({k: v for k, v in frozen.items() if k != 'fingerprint'})
+        self.snapshot.write_text(json.dumps(frozen))
+        self.assertEqual(read_snapshot(self.snapshot)['blocks'], blocks)
+        self.assertEqual(len(payload['summary_request']['jobs']), 2)
+        frozen['schema_version'] = 4
+        frozen['fingerprint'] = fingerprint({k: v for k, v in frozen.items() if k != 'fingerprint'})
+        self.snapshot.write_text(json.dumps(frozen))
+        with self.assertRaises(SnapshotError): read_snapshot(self.snapshot)
+
     def test_calendar_split_uses_one_commit_description_and_preserves_meeting(self):
         _, blocks, payload = self.split_group(calendar=True)
         request, mapping = build_summary_request(payload['blocks'])
@@ -281,6 +313,99 @@ class TestSummaryRequest(unittest.TestCase):
         self.assertEqual((directory / 'token-usage.csv').read_bytes(), original_csv)
         with self.assertRaises(ValueError):
             benchmark(self.snapshot, directory, model='different-model', resume=True)
+
+    def invalid_process(self, command, **kwargs):
+        result = self.fake_process(command, **kwargs)
+        if command[-1] != '--version':
+            directory = Path(command[command.index('--output-last-message') + 1]).parent
+            if directory.name == 'compact':
+                response = json.loads((directory / 'response.json').read_text())
+                response['judgments'][0]['description'] = 'Invalid PRs: #42'
+                (directory / 'response.json').write_text(json.dumps(response))
+        return result
+
+    def test_invalid_summary_preserves_measured_cost_and_blocks_assembly_receipt(self):
+        save_snapshot(self.snapshot, self.normalized, self.collection, self.blocks, self.review, self.ai)
+        directory = self.directory / 'compact'
+        with patch('run_codex_summary.subprocess.run', side_effect=self.invalid_process), self.assertRaises(ValueError):
+            run_summary(self.snapshot, directory, model='test-model')
+        path = directory / 'usage-attempt.json'
+        receipt = json.loads(path.read_text())
+        self.assertEqual(receipt['summary_status'], 'summary_invalid')
+        self.assertFalse((directory / 'usage-run.json').exists())
+        record = collect_run(path, ZoneInfo('Asia/Ho_Chi_Minh'))
+        self.assertEqual(record['total_tokens'], 165)
+        self.assertEqual(len((directory / 'attempt-token-usage.csv').read_text().splitlines()), 2)
+        with self.assertRaises(ValueError):
+            collect_run(path, ZoneInfo('Asia/Ho_Chi_Minh'), expected_ai_output=directory / 'ai-output.json')
+        receipt['provider_usage']['input_tokens'] += 1
+        path.write_text(json.dumps(receipt))
+        with self.assertRaises(ValueError): collect_run(path, ZoneInfo('Asia/Ho_Chi_Minh'))
+
+    def test_benchmark_retry_includes_rejected_summary_cost_without_double_counting(self):
+        save_snapshot(self.snapshot, self.normalized, self.collection, self.blocks, self.review, self.ai)
+        directory = self.directory / 'benchmark'
+        with patch('run_codex_summary.subprocess.run', side_effect=self.invalid_process), self.assertRaises(ValueError):
+            benchmark(self.snapshot, directory, model='test-model')
+        ledger = json.loads((directory / 'attempts.json').read_text())
+        self.assertEqual(ledger['total_known_tokens'], 330)
+        self.assertEqual(ledger['attempts'][0]['summary_status'], 'summary_invalid')
+        with patch('run_codex_summary.subprocess.run', side_effect=self.fake_process) as process:
+            report = benchmark(self.snapshot, directory, model='test-model', resume=True)
+            self.assertEqual(process.call_count, 2)
+        self.assertEqual(report['attempt_usage']['total_known_tokens'], 495)
+        self.assertEqual(report['attempt_usage']['strategies']['compact']['known_tokens'], 330)
+        self.assertEqual(report['results']['compact']['total_tokens'], 165)
+        csv = (directory / 'token-usage.csv').read_bytes()
+        self.assertEqual(len(csv.decode().splitlines()), 4)
+        with patch('run_codex_summary.subprocess.run', side_effect=AssertionError('must reuse')):
+            self.assertEqual(benchmark(self.snapshot, directory, model='test-model', resume=True), report)
+        self.assertEqual((directory / 'token-usage.csv').read_bytes(), csv)
+
+    def test_unknown_attempt_is_not_reported_as_zero(self):
+        save_snapshot(self.snapshot, self.normalized, self.collection, self.blocks, self.review, self.ai)
+        directory = self.directory / 'benchmark'
+        def missing_usage(command, **kwargs):
+            result = self.fake_process(command, **kwargs)
+            if command[-1] != '--version':
+                path = Path(command[command.index('--output-last-message') + 1]).parent
+                if path.name == 'compact':
+                    kwargs['stdout'].seek(0); kwargs['stdout'].truncate()
+                    kwargs['stdout'].write(json.dumps({'type': 'thread.started', 'thread_id': 'unknown'}))
+            return result
+        with patch('run_codex_summary.subprocess.run', side_effect=missing_usage), self.assertRaises(ValueError):
+            benchmark(self.snapshot, directory, model='test-model')
+        ledger = json.loads((directory / 'attempts.json').read_text())
+        self.assertFalse(ledger['all_attempts_measured'])
+        self.assertEqual(ledger['strategies']['compact']['unknown_attempts'], 1)
+        self.assertIsNone(ledger['attempts'][0]['total_tokens'])
+        with self.assertRaises(ValueError):
+            collect_run(directory / 'compact/usage-attempt.json', ZoneInfo('Asia/Ho_Chi_Minh'))
+
+    def test_nonzero_process_with_completed_usage_still_records_attempt(self):
+        save_snapshot(self.snapshot, self.normalized, self.collection, self.blocks, self.review, self.ai)
+        def failure(command, **kwargs):
+            result = self.fake_process(command, **kwargs)
+            return result if command[-1] == '--version' else subprocess.CompletedProcess(command, 1)
+        directory = self.directory / 'process-failure'
+        with patch('run_codex_summary.subprocess.run', side_effect=failure), self.assertRaises(ValueError):
+            run_summary(self.snapshot, directory, model='test-model')
+        path = directory / 'usage-attempt.json'
+        self.assertEqual(json.loads(path.read_text())['summary_status'], 'process_failed')
+        self.assertEqual(collect_run(path, ZoneInfo('Asia/Ho_Chi_Minh'))['total_tokens'], 165)
+
+    def test_success_and_attempt_receipts_upsert_same_invocation(self):
+        from collect_token_usage import update_csv
+        result = self.run_fake()
+        output = self.directory / 'all-tokens.csv'
+        for key in ('usage_run_manifest', 'usage_attempt_manifest'):
+            record = collect_run(result[key], ZoneInfo('Asia/Ho_Chi_Minh'))
+            update_csv(output, [record])
+        import csv
+        with output.open() as handle:
+            rows = list(csv.DictReader(handle))
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(int(rows[0]['total_tokens']), 165)
 
 
 if __name__ == '__main__': unittest.main()

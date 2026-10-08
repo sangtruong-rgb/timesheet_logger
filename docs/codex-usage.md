@@ -72,6 +72,10 @@ every eligible block; canonical `ai-output.json` keeps block IDs. Assembly also 
 deterministic fallback descriptions within a v3 group and rejects conflicting AI
 descriptions for its pieces.
 
+Snapshot v4 assigns the group identity before splitting and before per-piece
+timestamp assignment. This keeps a start-minute commit from separating otherwise
+shared descriptions. V1-v3 snapshots reproduce their previous allocation behavior.
+
 It uses a fresh, ephemeral, read-only CLI invocation without user config/rules,
 from the isolated run directory. A narrow `model_instructions_file` replaces coding
 instructions; project documents and host skill discovery are skipped. Shell,
@@ -100,7 +104,14 @@ The adapter accepts exactly one fresh thread and one completed turn. Missing cou
 invalid numbers, duplicate completion, extra thread/turn, failure/error, malformed
 events, changed evidence or conflicting target/run/output blocks attribution. A
 failed/timeout invocation retains diagnostics but publishes no success manifest.
-Usage can still have been consumed on a failed request; it is not recorded as zero.
+Every invocation also retains a `codex_summary_attempt_v1` receipt in
+`usage-attempt.json`. When the event log proves completed usage, request/snapshot
+verification records its counts independently of summary acceptance, including
+rejected descriptions and nonzero exits with a valid completed turn. A local
+`attempt-token-usage.csv` records that invocation; missing or ambiguous usage stays
+unknown and creates no count. Attempt receipts cannot replace the validated output
+manifest during assembly. Success and attempt receipts share the same CSV identity,
+so collecting both upserts one consumption record.
 Unsupported schemas need a verified adapter, not fabricated values.
 
 ## Before/after benchmark
@@ -120,6 +131,10 @@ source evidence and metadata; review descriptions for meaning. One pair does not
 establish a statistical average. Cached input stays inside provider input when
 reporting token reduction. `--resume` verifies completed evidence before reusing it
 and creates a new retry directory for unfinished strategies, preserving failures.
+An `attempts.json` ledger and the benchmark CSV include verified rejected/retry
+invocations, even if a strategy aborts before the comparison completes. The report
+separates successful comparison counts from all known attempt costs and lists
+unknown attempts explicitly. Unknown costs are never claimed to be zero.
 No timesheet is published by the benchmark. Its own usage CSV stays in its run directory.
 
 Configuration reference: [Codex configuration](https://developers.openai.com/codex/config-reference/).
