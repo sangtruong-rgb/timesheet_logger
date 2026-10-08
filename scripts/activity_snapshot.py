@@ -20,7 +20,8 @@ def fingerprint(value):
 def read_snapshot(path):
     try:
         snapshot = json.loads(Path(path).read_text(encoding="utf-8"))
-        if not isinstance(snapshot, dict) or snapshot.get("schema_version") != 1:
+        if (not isinstance(snapshot, dict) or type(snapshot.get('schema_version')) is not int
+                or snapshot['schema_version'] not in (1, 2, 3, 4)):
             raise ValueError("Unsupported snapshot")
         expected = snapshot["fingerprint"]
         body = {k: v for k, v in snapshot.items() if k != "fingerprint"}
@@ -34,12 +35,16 @@ def read_snapshot(path):
             raise ValueError("Snapshot dates conflict")
         from build_time_blocks import build_time_blocks
         retained = []
-        rebuilt = build_time_blocks(snapshot["normalized"], unassigned_activity=retained)
+        rebuilt = build_time_blocks(snapshot["normalized"], unassigned_activity=retained,
+                                    merge_short_commits=snapshot['schema_version'] >= 2,
+                                    short_commit_merge_minutes=30 if snapshot['schema_version'] == 2 else 20,
+                                    commit_allocation_version=2 if snapshot['schema_version'] >= 4 else 1)
         if rebuilt != snapshot["blocks"] or retained != snapshot["unassigned_activity"]:
             raise ValueError("Snapshot block/source evidence conflicts")
         from prepare_ai_input import prepare_activity_input
         maximum = snapshot["ai_input"]["payload_measurement"]["max_bytes"]
-        if prepare_activity_input(rebuilt, retained, maximum) != snapshot["ai_input"]:
+        if prepare_activity_input(rebuilt, retained, maximum,
+                                  payload_version=snapshot['ai_input'].get('payload_version', 1)) != snapshot["ai_input"]:
             raise ValueError("Snapshot AI input conflicts")
         return snapshot
     except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
@@ -48,7 +53,8 @@ def read_snapshot(path):
 
 def save_snapshot(path, normalized, collection, blocks, unassigned, ai_input, ai_export=None):
     path = Path(path)
-    body = {"schema_version": 1, "normalized": normalized, "collection": collection,
+    # v4 freezes stable groups/merge associations; v1-v3 retain previous allocation.
+    body = {"schema_version": 4, "normalized": normalized, "collection": collection,
             "blocks": blocks, "unassigned_activity": unassigned, "ai_input": ai_input}
     extra = [ai_export] if ai_export else []
     try:
@@ -67,7 +73,8 @@ def _save_snapshot(path, body, extra, ai_input, ai_export):
             validate_auxiliary_output(ai_export, protected_paths=[path])
         if path.exists():
             existing = read_snapshot(path)
-            if {k: v for k, v in existing.items() if k not in ("run_id", "fingerprint")} != body:
+            comparable = {**body, 'schema_version': existing['schema_version']}
+            if {k: v for k, v in existing.items() if k not in ("run_id", "fingerprint")} != comparable:
                 raise SnapshotError("Snapshot is immutable; choose a new snapshot path when source activity changes")
             snapshot = existing
         else:

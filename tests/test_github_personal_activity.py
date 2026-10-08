@@ -143,6 +143,17 @@ class TestPRActionCollection(unittest.TestCase):
         normalized = normalize_all(str(DATE), [], prs, [], 'Asia/Ho_Chi_Minh')
         self.assertEqual(normalized['pull_requests'][0]['events'], prs[0]['events'])
 
+    def test_merge_commit_sha_survives_collection_dedup_and_normalization(self):
+        api = API([pull(merged='2026-10-06T04:00:00Z')])
+        original_get = api.get
+        api.get = lambda endpoint: {**original_get(endpoint), 'merge_commit_sha': 'a' * 40}
+        prs = self.collect(api)
+        self.assertEqual(prs[0]['merge_commit_sha'], 'a' * 40)
+        model = normalize_all(str(DATE), [], prs, [], 'Asia/Ho_Chi_Minh')
+        self.assertEqual(model['pull_requests'][0]['merge_commit_sha'], 'a' * 40)
+        with self.assertRaises(ValueError):
+            deduplicate_prs([prs[0], {**prs[0], 'merge_commit_sha': 'b' * 40}])
+
     def test_actions_are_associated_with_their_own_blocks(self):
         api = API([pull(merged='2026-10-06T08:00:00Z')], {1: [review(10)]})
         model = normalize_all(str(DATE), [], self.collect(api), [], 'Asia/Ho_Chi_Minh')

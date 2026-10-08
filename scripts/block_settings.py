@@ -6,6 +6,7 @@ from activity_settings import load_config
 LEGACY_STRATEGY = "legacy_workday_windows"
 CLUSTER_STRATEGY = "activity_clusters"
 COMMIT_STRATEGY = "commit_intervals"
+SHORT_COMMIT_MERGE_MINUTES = 20
 DEFAULT_CLUSTER_POLICY = {
     "strategy": CLUSTER_STRATEGY,
     "inactivity_gap_minutes": 45,

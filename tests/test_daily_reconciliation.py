@@ -195,6 +195,49 @@ class TestDailyReconciliation(unittest.TestCase):
         self.save([row()])
         self.assert_blocked([row(), row(description="Different evidence")])
 
+    def test_overlapping_generated_intervals_preserve_existing_files(self):
+        self.save([row()])
+        cases = ([row('09:00', '11:00', 120), row('10:00', '12:00', 120)],
+                 [row(), row('10:00', '11:00', 60)],
+                 [row('10:00', '12:00', 120), row('09:00', '11:00', 120)],
+                 [row('22:00', '24:00', 120), row('23:00', '23:30', 30)])
+        for status in ('complete', 'demo'):
+            for incoming in cases:
+                with self.subTest(status=status, incoming=incoming):
+                    original = copy.deepcopy(incoming)
+                    self.assert_blocked(incoming, status)
+                    self.assertEqual(incoming, original)
+
+    def test_adjacent_generated_intervals_are_accepted_in_any_order(self):
+        self.save([row('23:30', '24:00', 30), row('09:30', '10:00', 30),
+                   row('09:00', '09:30', 30), row('23:00', '23:30', 30)])
+        self.assertEqual([(r['entry']['start'], r['entry']['end']) for r in self.records()],
+                         [('09:00', '09:30'), ('09:30', '10:00'), ('23:00', '23:30'), ('23:30', '24:00')])
+        self.assertEqual(sum(r['entry']['duration_minutes'] for r in self.records()), 120)
+
+    def test_first_save_rejects_overlap_without_creating_daily_files(self):
+        with self.assertRaisesRegex(TimesheetReconciliationError, 'Generated intervals.*overlap'):
+            self.save([row('09:00', '11:00', 120), row('10:00', '12:00', 120)])
+        self.assertFalse(self.json.exists())
+        self.assertFalse(self.md.exists())
+
+    def test_exact_override_does_not_hide_overlapping_generated_input(self):
+        self.seed([row('09:00', '11:00', 120, kind='override')])
+        self.assert_blocked([row('09:00', '11:00', 120), row('10:00', '12:00', 120)])
+
+    def test_standalone_cli_rejects_overlap_and_preserves_daily_files(self):
+        self.save([row()])
+        original = {p: p.read_bytes() for p in (self.json, self.md)}
+        incoming = self.directory / 'incoming.json'
+        incoming.write_text(json.dumps([row('09:00', '11:00', 120), row('10:00', '12:00', 120)]))
+        response = subprocess.run([sys.executable, str(ROOT / 'scripts/save_timesheet.py'),
+                                   '-i', str(incoming), '-d', str(self.directory), '--date', DATE,
+                                   '--collection-status', 'complete'], capture_output=True, text=True, timeout=15)
+        self.assertEqual(response.returncode, 2, response.stderr)
+        self.assertIn('overlap', response.stderr)
+        for path, content in original.items():
+            self.assertEqual(path.read_bytes(), content)
+
     def test_unsupported_provenance_is_not_silently_discarded(self):
         self.seed([row(kind="another-tool")])
         self.assert_blocked([])

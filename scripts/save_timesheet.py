@@ -260,7 +260,7 @@ def reconcile_daily_entries(existing, incoming, target_date, collection_status):
             raise TimesheetReconciliationError("Unknown row provenance; review before reconciliation")
 
     for item in incoming:
-        entry_interval(item, target_date)
+        start, end = entry_interval(item, target_date)
         metadata = item.get("collection", {})
         if not isinstance(metadata, dict) or metadata.get("status", collection_status) != collection_status:
             raise TimesheetReconciliationError("Incoming row collection status does not match the successful snapshot")
@@ -277,6 +277,12 @@ def reconcile_daily_entries(existing, incoming, target_date, collection_status):
         key = get_entry_key(item)
         if key in candidates:
             raise TimesheetReconciliationError("Incoming snapshot has duplicate intervals")
+        for candidate in candidates.values():
+            other_start, other_end = entry_interval(candidate, target_date)
+            if start < other_end and other_start < end:
+                raise TimesheetReconciliationError(
+                    f"Generated intervals {candidate['entry']['start']}–{candidate['entry']['end']} and "
+                    f"{item['entry']['start']}–{item['entry']['end']} overlap; review required")
         candidates[key] = {**item, "provenance": {"kind": "generated", "generator": "timesheet_logger"}}
 
     overridden = 0

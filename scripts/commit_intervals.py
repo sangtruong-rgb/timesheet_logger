@@ -4,13 +4,17 @@ Commit timestamps are minute-floored to match the timesheet's HH:MM precision.
 An ending commit describes all remaining pieces of its interval, even when lunch
 or Calendar separates the pieces. It is completion evidence, not an assertion
 that the commit happened inside each piece. PR actions use ordinary [start,end)
-assignment and never generate additional minutes.
+assignment; same-minute merges with a matching commit SHA use its allocation.
+Neither assignment generates additional minutes.
+Allocations with 1–19 work minutes merge backward before exclusions are split
+into rows. The first allocation, zero-work allocations and confirmed-end tails
+remain separate. Lunch/Calendar are never counted as development by a merge.
 """
 import datetime
 import re
 
 from block_identity import BlockIdentityError
-from block_settings import COMMIT_STRATEGY, LEGACY_STRATEGY
+from block_settings import COMMIT_STRATEGY, LEGACY_STRATEGY, SHORT_COMMIT_MERGE_MINUTES
 
 
 def work_confirmation(date, start, end=None):
@@ -40,9 +44,16 @@ def subtract_intervals(start, end, excluded):
         yield cursor, end
 
 
-def build_commit_intervals(model, date, tz, unassigned):
+def build_commit_intervals(model, date, tz, unassigned, *, merge_short_commits=True,
+                           short_commit_merge_minutes=SHORT_COMMIT_MERGE_MINUTES,
+                           allocation_version=2):
     from build_time_blocks import build_time_blocks, parse_dt, calculate_minutes
     from get_pr_activity import deduplicate_prs
+
+    if type(short_commit_merge_minutes) is not int or short_commit_merge_minutes < 1:
+        raise BlockIdentityError('Short commit merge threshold must be a positive integer')
+    if type(allocation_version) is not int or allocation_version not in (1, 2):
+        raise BlockIdentityError('Unsupported commit allocation version')
 
     confirmation = model.get("work_confirmation")
     if not isinstance(confirmation, dict) or confirmation.get("date") != date.isoformat():
@@ -82,9 +93,20 @@ def build_commit_intervals(model, date, tz, unassigned):
 
     assigned = set()
 
-    def append_work(left, right, closing):
+    def append_work(left, right, closing, merged_intervals=None):
         pieces = list(subtract_intervals(left, right, excluded))
         evidence = [c for _, c in sorted(closing, key=lambda pair: (pair[1].get("repository", ""), pair[1].get("hash", "")))]
+        allocation = {"start": left.isoformat(), "end": right.isoformat(),
+                      "basis": "ending_commit" if closing else "confirmed_end",
+                      "commit_precision": "minute_floor",
+                      **({"short_commit_merge_minutes": short_commit_merge_minutes,
+                          "merged_intervals": merged_intervals} if merged_intervals else {})}
+        timezone = model.get("timezone", getattr(tz, "key", str(tz)))
+        if closing and allocation_version >= 2:
+            from summary_request import allocation_group_id
+            allocation['closing_commits'] = [{'repository': c.get('repository', ''), 'hash': c.get('hash', '')}
+                                             for c in evidence]
+            allocation['summary_group_id'] = allocation_group_id(date.isoformat(), timezone, allocation)
         for piece_start, piece_end in pieces:
             if calculate_minutes(piece_start, piece_end) < 1 or piece_start.strftime("%H:%M") == piece_end.strftime("%H:%M"):
                 continue
@@ -93,22 +115,36 @@ def build_commit_intervals(model, date, tz, unassigned):
                 "end_time": "24:00" if piece_end == day_end else piece_end.strftime("%H:%M"),
                 "duration_minutes": calculate_minutes(piece_start, piece_end),
                 "interval": {"start": piece_start.isoformat(), "end": piece_end.isoformat()},
-                "timezone": model.get("timezone", getattr(tz, "key", str(tz))),
+                "timezone": timezone,
                 "block_type": "development", "time_basis": "estimated",
                 "estimation_reason": "commit_interval" if closing else "confirmed_work_window",
                 "estimation_policy": {"strategy": COMMIT_STRATEGY},
                 "work_confirmation": dict(confirmation),
-                "allocation": {"start": left.isoformat(), "end": right.isoformat(),
-                               "basis": "ending_commit" if closing else "confirmed_end",
-                               "commit_precision": "minute_floor"},
+                "allocation": dict(allocation),
                 "calendar_titles": [], "commits": list(evidence), "prs": [],
             })
             assigned.update(i for i, _ in closing)
 
     cursor = start
+    allocations = []
     for boundary, closing in sorted(groups.items()):
-        append_work(cursor, boundary, closing)
+        minutes = sum(calculate_minutes(left, right)
+                      for left, right in subtract_intervals(cursor, boundary, excluded))
+        original = {"start": cursor.isoformat(), "end": boundary.isoformat()}
+        if (merge_short_commits and 0 < minutes < short_commit_merge_minutes and allocations
+                and allocations[-1]['work_minutes'] > 0):
+            previous = allocations[-1]
+            previous['end'] = boundary
+            previous['closing'].extend(closing)
+            previous['work_minutes'] += minutes
+            previous['intervals'].append(original)
+        else:
+            allocations.append({'start': cursor, 'end': boundary, 'closing': list(closing),
+                                'work_minutes': minutes, 'intervals': [original]})
         cursor = boundary
+    for allocation in allocations:
+        append_work(allocation['start'], allocation['end'], allocation['closing'],
+                    allocation['intervals'] if len(allocation['intervals']) > 1 else None)
     if finish is not None and cursor < finish:
         append_work(cursor, finish, [])
     blocks.sort(key=lambda b: (b["start_time"], b["end_time"]))
@@ -134,12 +170,44 @@ def build_commit_intervals(model, date, tz, unassigned):
     for index, commit in enumerate(commits):
         if index not in assigned and not assign_by_timestamp(commit, "commits"):
             retain("git", commit)
+
+    def assign_merge_by_commit(action):
+        # Associate only proven merge identities in the closing commit's minute.
+        # The event remains at its original timestamp and creates no minutes.
+        sha = action.get('merge_commit_sha')
+        instant = timestamp(action)
+        if (allocation_version < 2 or action.get('status') != 'merged' or not sha
+                or instant is None or not start <= instant < day_end
+                or (finish is not None and instant > finish)):
+            return False
+        matches = []
+        for block in blocks:
+            refs = block.get('allocation', {}).get('closing_commits', [])
+            if not any(ref['hash'] == sha and ref['repository'] == action.get('repository') for ref in refs):
+                continue
+            for closing in block['commits']:
+                closing_time = timestamp(closing)
+                if (closing.get('hash') == sha and closing.get('repository') == action.get('repository')
+                        and closing_time is not None
+                        and closing_time.replace(second=0, microsecond=0) == instant.replace(second=0, microsecond=0)):
+                    matches.append(block)
+                    break
+        if not matches:
+            return False
+        last = max(matches, key=lambda block: block['interval']['end'])
+        associated = {**action, 'assignment': {'basis': 'matching_merge_commit', 'commit_hash': sha,
+                                             'repository': action['repository']}}
+        associated['events'] = [{**event, 'assignment': associated['assignment']}
+                                for event in action.get('events', [])]
+        last['prs'].append(associated)
+        return True
+
     for reference in model.get("pull_requests", []):
         actions = ([{**reference, "status": event["action"], "timestamp": event["timestamp"],
                      "actor": event.get("actor"), "events": [event]} for event in reference["events"]]
                    if reference.get("events") else [reference])
         for action in actions:
-            if not assign_by_timestamp(action, "prs"):
+            if not assign_merge_by_commit(action) and not assign_by_timestamp(action, "prs"):
                 retain("github", action)
     for block in blocks:
         block["prs"] = deduplicate_prs(block["prs"])

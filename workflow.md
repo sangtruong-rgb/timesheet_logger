@@ -44,13 +44,22 @@ intervals block. Legacy rows without provenance require classification, not dele
 D02: `commit_intervals` requires a per-day confirmed `--work-start`, with optional
 `--work-end`. Allocate start → first commit, then commit → commit; subtract lunch
 12:00–13:30 and scheduled Calendar coverage. No mid-session break input, idle split,
-minimum duration or maximum duration. No end confirmation means stop at the last
+padding to a minimum or maximum duration. Commit allocations with 1–19 net work
+minutes merge into the previous allocation before lunch/Calendar splitting; preserve
+all evidence and original allocation bounds. The first allocation, zero-work
+allocations, 20 minutes or more and confirmed-end tails remain separate. No end confirmation means stop at the last
 commit. Confirmations are frozen with the evidence and cannot be changed in assemble.
 Commit boundaries are minute-floored; simultaneous commits share an interval. Each
 closing commit provides completion context for all split pieces of its interval.
-PRs attach by timestamp without creating time. Development remains estimated;
+PRs attach by timestamp without creating time. A same-minute merge with a matching
+qualified commit SHA attaches to its closing allocation, preserving the event time.
+Development remains estimated;
 continuous work between boundaries is an explicit allocation assumption. Scheduled
 meetings remain whole during lunch/outside hours, attendance unconfirmed.
+Snapshot v4 freezes allocation group IDs before piece-specific evidence assignment
+and permits proven merge-commit associations. V3 freezes the previous under-20-minute
+behavior; v2 retains under-30-minute merging
+and v1 retains unmerged intervals.
 Older activity-cluster/legacy snapshots retain their original behavior. Recurring
 schedule configuration and BREAK/OT classification remain unsupported.
 
@@ -62,13 +71,21 @@ Actual marked skill-run totals include instructions, tool/context overhead and c
 no fixed full-run budget is asserted until live Claude measurements establish a
 baseline. Report input/output/cache and total input + output + cache under D06.
 Payload size is separate: exact JSON bytes and bytes/4 heuristic, not exact tokens.
-Default payload guard is 12,000 bytes including metadata. Overflow blocks synthesis
+The v2/v3 payload guard bounds the exact compact model request at 12,000 UTF-8 bytes;
+the larger audit envelope is measured separately. Legacy snapshots retain their
+original full-export guard. Overflow blocks synthesis
 without dropping evidence; review/reduce the selected evidence deliberately or set
 an explicit larger bound. Do not claim a daily total below 600 or a payload below 350.
 
 Text is deduplicated, raw API metadata excluded from judgment, Calendar-only blocks
 use deterministic titles, and scripts do date math/suffix formatting. Ticket IDs are
-extracted; development activity is clustered by time, not automatically by ticket.
+extracted. Payload v3 gives pieces of one commit allocation split by lunch/Calendar
+one summary job, combining their PR context. The topic stays the same across pieces;
+each row retains its own PR suffix and source evidence. Different allocations keep
+separate jobs. Frozen v1/v2 payloads retain their original semantic deduplication.
+New allocation groups combine commit evidence across pieces even when a commit
+in the start minute is timestamp-assigned to just one row.
+This does not merge timesheet intervals or automatically cluster work by ticket.
 No automatic AI
 cache exists. Validated supplied judgments may be reused explicitly with the same
 frozen snapshot; a changed snapshot needs new judgment/review.

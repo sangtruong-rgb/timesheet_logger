@@ -72,6 +72,40 @@ class TestPipelineEvidenceBlocks(unittest.TestCase):
         self.assertIn("(estimated)", (self.output / f"{DATE}.md").read_text())
         self.assertEqual(sum(p["time_basis"] == "estimated" for p in json.loads(self.ai.read_text())["blocks"]), 1)
 
+    def test_evening_only_activity_stays_in_review_with_scheduled_meeting(self):
+        self.assertEqual(self.pipeline([event('20:00', '21:00', 'Evening meeting')], [commit('19:00')]), 0)
+        rows = self.rows()
+        self.assertEqual([(r['entry']['start'], r['entry']['end'], r['entry']['duration_minutes'], r['time_basis'])
+                          for r in rows], [('20:00', '21:00', 60, 'scheduled')])
+        self.assertEqual(rows[0]['attendance'], 'unconfirmed')
+        self.assertEqual(rows[0]['sources']['commits'], [])
+        review = json.loads((self.output / f'{DATE}.activity-review.json').read_text())
+        self.assertEqual(review['unassigned_activity'][0]['reason'], 'outside_blocks')
+        self.assertEqual(review['unassigned_activity'][0]['activity']['hash'], 'test-commit')
+        payload = json.loads(self.ai.read_text())
+        self.assertEqual(payload['blocks'], [])
+        self.assertEqual(payload['unassigned_activity'][0]['source'], 'git')
+        self.assertIn('**Total Proposed Time:** 60 mins', (self.output / f'{DATE}.md').read_text())
+
+    def test_clipped_workday_gap_preserves_evening_evidence_and_rerun_bytes(self):
+        calendars = [event('20:00', '21:00', 'Evening meeting')]
+        activities = [commit('15:00', 'daytime'), commit('19:00', 'evening')]
+        self.assertEqual(self.pipeline(calendars, activities), 0)
+        rows = self.rows()
+        self.assertEqual([(r['entry']['start'], r['entry']['end'], r['entry']['duration_minutes'])
+                          for r in rows], [('13:30', '17:30', 240), ('20:00', '21:00', 60)])
+        payload = json.loads(self.ai.read_text())
+        self.assertEqual([b['block'] for b in payload['blocks']], [{'start': '13:30', 'end': '17:30'}])
+        self.assertEqual(rows[0]['sources']['commits'][0]['hash'], 'daytime')
+        review_path = self.output / f'{DATE}.activity-review.json'
+        review = json.loads(review_path.read_text())
+        self.assertEqual(review['unassigned_activity'][0]['activity']['hash'], 'evening')
+        self.assertIn('**Total Proposed Time:** 300 mins', (self.output / f'{DATE}.md').read_text())
+        before = {**self.snapshot(), review_path: review_path.read_bytes()}
+        self.assertEqual(self.pipeline(calendars, activities), 0)
+        for path, content in before.items():
+            self.assertEqual(path.read_bytes(), content)
+
     def test_rerun_without_activity_removes_previously_supported_generated_gap(self):
         events = [event(), event("13:30", "14:00", "Planning")]
         self.assertEqual(self.pipeline(events, [commit()]), 0)
@@ -167,11 +201,14 @@ class TestPipelineEvidenceBlocks(unittest.TestCase):
         self.assertEqual(self.rows()[0]["entry"]["duration_minutes"], 60)
 
     def test_rerun_replaces_old_overlapping_generated_rows(self):
-        from save_timesheet import save_timesheet
         old = [{"entry": {"date": DATE, "start": start, "end": end, "duration_minutes": 60,
-                         "description": "Old scheduled meeting. PRs: None"}, "sources": {}}
+                         "description": "Old scheduled meeting. PRs: None"}, "sources": {},
+                "provenance": {"kind": "generated", "generator": "timesheet_logger"}}
                for start, end in [("09:00", "10:00"), ("09:30", "10:30")]]
-        save_timesheet(old, self.output, target_date=DATE, collection_status="complete")
+        # Seed historical invalid rows directly: the current writer rejects new overlaps.
+        self.output.mkdir()
+        (self.output / f"{DATE}.json").write_text(json.dumps(old))
+        (self.output / f"{DATE}.md").write_text("Old overlapping generated meetings")
         self.assertEqual(self.pipeline([event("09:00", "10:00", "A"), event("09:30", "10:30", "B")]), 0)
         self.assertEqual(len(self.rows()), 3)
         self.assertIn("Removed: 2", self.stdout.getvalue())

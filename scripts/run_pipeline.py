@@ -310,7 +310,9 @@ def assemble_activity(args, date_str, normalized, collection, output_dir, *, fro
             print(f" PREPARED immutable snapshot: {snapshot_path}")
             print(f" Run ID: {snapshot['run_id']}; no final timesheet or token file written.")
             return 0
-        entries = build_entries(blocks, load_ai_judgments(args.ai_output))
+        from summary_request import commit_group_mapping
+        entries = build_entries(blocks, load_ai_judgments(args.ai_output),
+                                summary_groups=commit_group_mapping(ai_payload['blocks']))
     except BlockIdentityError as exc:
         draft = save_activity_draft(date_str, normalized, collection, output_dir,
                                     ai_reason=str(exc), ai_payload=ai_payload)

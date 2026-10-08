@@ -27,6 +27,10 @@ def deduplicate_prs(raw_prs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         if key not in references:
             references[key] = {**pr, "events": []}
         record = references[key]
+        if pr.get('merge_commit_sha'):
+            if record.get('merge_commit_sha') not in (None, pr['merge_commit_sha']):
+                raise ValueError('Conflicting PR merge commit identities')
+            record['merge_commit_sha'] = pr['merge_commit_sha']
         if priority.get(pr.get("status"), 0) > priority.get(record.get("status"), 0):
             for field in ("status", "timestamp", "actor"):
                 record[field] = pr.get(field)
@@ -75,6 +79,7 @@ def query_gh_prs(target_date, repos=None, users=None, tz=None, client=None):
                 reference = {"id": number, "repository": repository, "title": pr["title"],
                              "url": pr["html_url"]}
                 events = []
+                merge_commit_sha = None
                 if author.casefold() in ours and is_today(pr["created_at"]):
                     events.append({"action": "opened", "timestamp": parse_timestamp(pr["created_at"]).astimezone(tz).isoformat(),
                                    "actor": author})
@@ -101,10 +106,12 @@ def query_gh_prs(target_date, repos=None, users=None, tz=None, client=None):
                     detail = client.get(f"{endpoint}/{number}")
                     merger = (detail.get("merged_by") or {}).get("login")
                     if author.casefold() in ours or previously_reviewed or (merger and merger.casefold() in ours):
+                        merge_commit_sha = detail.get('merge_commit_sha')
                         events.append({"action": "merged", "timestamp": parse_timestamp(pr["merged_at"]).astimezone(tz).isoformat(),
                                        "actor": merger})
                 for event in events:
-                    results.append({**reference, "status": event["action"], "timestamp": event["timestamp"],
+                    results.append({**reference, **({'merge_commit_sha': merge_commit_sha} if merge_commit_sha else {}),
+                                    "status": event["action"], "timestamp": event["timestamp"],
                                     "actor": event.get("actor"), "events": [event]})
             if stop:
                 break
