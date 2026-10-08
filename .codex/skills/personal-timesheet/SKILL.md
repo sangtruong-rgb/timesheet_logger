@@ -9,6 +9,10 @@ Run the repository's deterministic pipeline and use Codex only to summarize its 
 
 ## Resolve the run
 
+When the skill was launched through `bin/personal-timesheet-codex`, live network
+and the host credential store are already available. Otherwise follow the
+escalation requirements below.
+
 1. Set `TS_ROOT` to `git rev-parse --show-toplevel` and quote every path because the repository path may contain spaces.
 2. Resolve the target date in the configured timezone, defaulting to today only when the request omits a date.
 3. Read `config/user-config.json` without printing private configuration. Use its confirmed identities, repositories, timezone, Calendar IDs, and credential paths.
@@ -16,6 +20,13 @@ Run the repository's deterministic pipeline and use Codex only to summarize its 
 5. Preserve existing files and edits. Put every new artifact for one run under one unique `data/audit/company-antigravity-<timestamp>/` directory.
 
 ## Prepare and summarize
+
+Live collection needs outbound network access and, on macOS, access to the GitHub
+credential store and Google OAuth token. Run the prepare command with
+`sandbox_permissions=require_escalated` on its first attempt. The user's request
+to run this skill authorizes these read-only source calls; let the Codex approval
+mechanism review the command instead of first running it in the restricted
+sandbox.
 
 Run prepare with live sources:
 
@@ -28,7 +39,13 @@ Run prepare with live sources:
   --output-dir "$TS_RUN/timesheets"
 ```
 
-Require every requested source to report `success/live`. If any live source fails, retain its diagnostic and draft, report `INCOMPLETE`, and stop dependent work. Never substitute a fixture, sample, historical export, or older snapshot.
+Require every requested source to report `success/live`. If prepare was
+accidentally run without escalation and Git/GitHub is unavailable while Calendar
+reports a transport or network error, preserve that failed run directory and
+retry once with `sandbox_permissions=require_escalated` in a new unique run
+directory. Treat the escalated result as authoritative. If any live source still
+fails, retain its diagnostic and draft, report `INCOMPLETE`, and stop dependent
+work. Never substitute a fixture, sample, historical export, or older snapshot.
 
 When `ai-input.json` has eligible blocks, run one isolated Codex summary invocation so usage is measured from `turn.completed.usage`:
 
@@ -59,6 +76,7 @@ Omit all three AI/usage arguments when no block needs an AI summary. Do not coll
 ## Review and attendance
 
 - Never infer continuous work from isolated commit or PR timestamps. Preserve `estimated` labels.
+- Treat `inferred_activity_boundaries` as review-required. Report the clustered intervals and do not publish them until the user confirms or overrides their start/end times.
 - Do not attach unassigned activity to a block or invent its duration.
 - Calendar status `confirmed` means the event exists, not that the user attended. Treat `self_response_status: needsAction`, `tentative`, or a missing self response as attendance unconfirmed.
 - A direct statement from the user that they attended is valid confirmation for the named interval.

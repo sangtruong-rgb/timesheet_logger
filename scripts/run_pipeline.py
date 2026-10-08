@@ -185,6 +185,8 @@ def _run():
     try:
         selected = settings_from_args(args)
         calendar_options = calendar_settings(args.config, args.calendar_token, args.calendar_credentials, args.calendar_ids)
+        from block_settings import block_policy_settings
+        block_policy = block_policy_settings(args.config)
         date_str = args.date or datetime.datetime.now(selected["timezone"]).date().isoformat()
         datetime.date.fromisoformat(date_str)
     except (ValueError, OSError, KeyError) as exc:
@@ -244,6 +246,10 @@ def _run():
     from normalize_activity import normalize_all, ActivityNormalizationError
     try:
         normalized = normalize_all(date_str, commits_data, pr_result["items"], cal_result["items"], selected["timezone_name"])
+        if block_policy is not None:
+            # Freeze the policy with the evidence so later assembly never depends
+            # on mutable host configuration.
+            normalized["block_policy"] = block_policy
     except ActivityNormalizationError as exc:
         raw = {"date": date_str, "timezone": selected["timezone_name"], "commits": commits_data,
                "pull_requests": pr_result["items"], "calendar": cal_result["items"]}

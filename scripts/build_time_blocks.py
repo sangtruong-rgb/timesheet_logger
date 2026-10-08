@@ -13,12 +13,11 @@ Rules:
      These durations are estimated, not proof of continuous work.
    - All development gaps exclude 12:00–13:30 before checking activity.
      Scheduled Calendar events during lunch are retained.
-2. When NO calendar events exist (deterministic fallback):
-   - Inspect commit and PR timestamps.
-   - If activity exists only in morning (< 12:30): block is 09:00–12:30.
-   - If activity exists only in afternoon (>= 12:30): block is 13:30–17:30.
-   - If activity spans both: split into 09:00–12:00 and 13:30–17:30.
-   - Retain only windows with aware activity timestamps inside them.
+2. With an explicit activity-cluster policy:
+   - Group timestamped development actions by idle gap and maximum duration.
+   - Round inferred boundaries to 15 minutes inside work/lunch/Calendar bounds.
+   - Dense PR batches stay in one short estimated block and require review.
+   - Profiles and frozen snapshots without a policy retain the legacy fallback.
 3. Associate commits and PRs deterministically with time blocks based on timestamps.
    Preserve unmatched activity separately for review, never in an arbitrary block.
 4. Calculate duration in minutes/hours deterministically in code.
@@ -32,6 +31,10 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 from block_identity import BlockIdentityError
 from activity_settings import resolve_timezone, timezone_settings
+from block_settings import CLUSTER_STRATEGY, policy_from_model
+
+
+CLUSTER_ROUNDING_MINUTES = 15
 
 
 def parse_dt(ts_str: str) -> Optional[datetime.datetime]:
@@ -52,6 +55,68 @@ def calculate_minutes(start_dt: datetime.datetime, end_dt: datetime.datetime) ->
     return max(0, int(delta.total_seconds() // 60))
 
 
+def _floor_time(value: datetime.datetime, minutes: int) -> datetime.datetime:
+    midnight = value.replace(hour=0, minute=0, second=0, microsecond=0)
+    elapsed = int((value - midnight).total_seconds() // 60)
+    return midnight + datetime.timedelta(minutes=(elapsed // minutes) * minutes)
+
+
+def _ceil_after_time(value: datetime.datetime, minutes: int) -> datetime.datetime:
+    """Return a rounded exclusive end that still contains an action on a boundary."""
+    floor = _floor_time(value, minutes)
+    return floor + datetime.timedelta(minutes=minutes)
+
+
+def _materialize_cluster(first, last, window_start, window_end, policy):
+    start = max(window_start, _floor_time(first, CLUSTER_ROUNDING_MINUTES))
+    end = min(window_end, _ceil_after_time(last, CLUSTER_ROUNDING_MINUTES))
+    minimum = datetime.timedelta(minutes=policy["minimum_block_minutes"])
+    if end - start < minimum:
+        extended_end = min(window_end, start + minimum)
+        if extended_end - start >= minimum:
+            end = extended_end
+        else:
+            start = max(window_start, end - minimum)
+    return start, end
+
+
+def activity_cluster_bounds(start, end, activities, policy):
+    """Build bounded estimated sessions from timestamps; every session has evidence."""
+    points = []
+    for activity in activities:
+        timestamp = parse_dt(activity.get("timestamp"))
+        if timestamp and timestamp.tzinfo is not None:
+            timestamp = timestamp.astimezone(start.tzinfo)
+            if start <= timestamp < end:
+                points.append(timestamp)
+    points.sort()
+    if not points:
+        return []
+
+    gap = datetime.timedelta(minutes=policy["inactivity_gap_minutes"])
+    maximum = datetime.timedelta(minutes=policy["maximum_block_minutes"])
+    clusters = []
+    first = previous = points[0]
+    for point in points[1:]:
+        proposed = _materialize_cluster(first, point, start, end, policy)
+        if point - previous > gap or proposed[1] - proposed[0] > maximum:
+            clusters.append(_materialize_cluster(first, previous, start, end, policy))
+            first = point
+        previous = point
+    clusters.append(_materialize_cluster(first, previous, start, end, policy))
+
+    # Defensive validation: inferred intervals must be ordered, disjoint and
+    # bounded. A policy that cannot meet these invariants is rejected.
+    for index, (cluster_start, cluster_end) in enumerate(clusters):
+        duration = cluster_end - cluster_start
+        if (not start <= cluster_start < cluster_end <= end
+                or duration < datetime.timedelta(minutes=policy["minimum_block_minutes"])
+                or duration > maximum
+                or (index and clusters[index - 1][1] > cluster_start)):
+            raise BlockIdentityError("Activity cluster policy produced invalid or overlapping intervals")
+    return clusters
+
+
 def build_time_blocks(normalized_data: Dict[str, Any], *, unassigned_activity=None) -> List[Dict[str, Any]]:
     """Build timed proposals; callers persisting evidence must collect unassigned_activity."""
     if unassigned_activity is not None:
@@ -68,6 +133,11 @@ def build_time_blocks(normalized_data: Dict[str, Any], *, unassigned_activity=No
     target_date_str = normalized_data.get("date", "")
     target_date = datetime.date.fromisoformat(target_date_str) if target_date_str else datetime.datetime.now(tz).date()
     target_date_str = target_date.isoformat()
+    try:
+        block_policy = policy_from_model(normalized_data)
+    except ValueError as exc:
+        raise BlockIdentityError(str(exc)) from exc
+    clustered = block_policy["strategy"] == CLUSTER_STRATEGY
 
     calendar = [ev for ev in normalized_data.get("calendar", [])
                 if not ev.get("all_day") and not (len(ev.get("start", "")) == 10 and len(ev.get("end", "")) == 10)]
@@ -82,6 +152,7 @@ def build_time_blocks(normalized_data: Dict[str, Any], *, unassigned_activity=No
                             "actor": event.get("actor"), "events": [event]})
         else:
             prs.append(reference)
+    development_activity = [*commits, *prs]
 
     daily_start = datetime.datetime.combine(target_date, datetime.time.min, tzinfo=tz)
     daily_end = datetime.datetime.combine(target_date + datetime.timedelta(days=1), datetime.time.min, tzinfo=tz)
@@ -144,15 +215,22 @@ def build_time_blocks(normalized_data: Dict[str, Any], *, unassigned_activity=No
         cur_cursor = day_start
 
         def append_development_gap(start, end):
-            # Subtract lunch first, then apply the existing 30-minute minimum
-            # to each remaining interval. Activity is checked per interval below.
+            # Subtract lunch first. Cluster mode then narrows the candidate gap
+            # around timestamped activity instead of claiming the whole gap.
             for gap_start, gap_end in ((start, min(end, lunch_start)),
                                        (max(start, lunch_end), end)):
-                if (gap_end - gap_start).total_seconds() >= 1800:
+                minimum = block_policy.get("minimum_block_minutes", 30) if clustered else 30
+                if (gap_end - gap_start).total_seconds() < minimum * 60:
+                    continue
+                bounds = (activity_cluster_bounds(gap_start, gap_end, development_activity, block_policy)
+                          if clustered else [(gap_start, gap_end)])
+                for cluster_start, cluster_end in bounds:
                     timeline.append({
                         "type": "development",
-                        "start": gap_start,
-                        "end": gap_end
+                        "start": cluster_start,
+                        "end": cluster_end,
+                        "estimation_reason": ("activity_cluster" if clustered
+                                              else "calendar_gap_with_activity")
                     })
 
         for seg in segments:
@@ -190,7 +268,9 @@ def build_time_blocks(normalized_data: Dict[str, Any], *, unassigned_activity=No
                 }} if item.get("calendar_overlap") else {}),
                 "block_type": item["type"],
                 "time_basis": "estimated" if estimated else "scheduled",
-                **({"estimation_reason": "calendar_gap_with_activity"} if estimated else {}),
+                **({"estimation_reason": item.get("estimation_reason", "calendar_gap_with_activity")} if estimated else {}),
+                **({"review": {"status": "required", "reasons": ["inferred_activity_boundaries"]},
+                    "estimation_policy": dict(block_policy)} if estimated and clustered else {}),
                 "commits": [],
                 "prs": []
             })
@@ -201,6 +281,29 @@ def build_time_blocks(normalized_data: Dict[str, Any], *, unassigned_activity=No
         if not commits and not prs:
             # Empty day
             return []
+
+        if clustered:
+            work_windows = (
+                (datetime.datetime.combine(target_date, datetime.time(9, 0), tzinfo=tz),
+                 datetime.datetime.combine(target_date, datetime.time(12, 0), tzinfo=tz)),
+                (datetime.datetime.combine(target_date, datetime.time(13, 30), tzinfo=tz),
+                 datetime.datetime.combine(target_date, datetime.time(17, 30), tzinfo=tz)),
+            )
+            for window_start, window_end in work_windows:
+                for cluster_start, cluster_end in activity_cluster_bounds(
+                        window_start, window_end, development_activity, block_policy):
+                    blocks.append({
+                        "date": target_date_str,
+                        "start_time": format_hhmm(cluster_start),
+                        "end_time": format_hhmm(cluster_end),
+                        "duration_minutes": calculate_minutes(cluster_start, cluster_end),
+                        "calendar_titles": [],
+                        "commits": [],
+                        "prs": [],
+                        "estimation_reason": "activity_cluster",
+                        "review": {"status": "required", "reasons": ["inferred_activity_boundaries"]},
+                        "estimation_policy": dict(block_policy),
+                    })
 
         # Analyze commit / PR timestamps
         all_times = []
@@ -218,7 +321,9 @@ def build_time_blocks(normalized_data: Dict[str, Any], *, unassigned_activity=No
         has_morning = any(t < noon for t in all_times)
         has_afternoon = any(t >= noon for t in all_times) if all_times else False
 
-        if has_morning and has_afternoon:
+        if clustered:
+            pass
+        elif has_morning and has_afternoon:
             s1 = datetime.datetime.combine(target_date, datetime.time(9, 0), tzinfo=tz)
             e1 = datetime.datetime.combine(target_date, datetime.time(12, 0), tzinfo=tz)
             s2 = datetime.datetime.combine(target_date, datetime.time(13, 30), tzinfo=tz)
@@ -270,7 +375,7 @@ def build_time_blocks(normalized_data: Dict[str, Any], *, unassigned_activity=No
         for block in blocks:
             block["block_type"] = "development"
             block["time_basis"] = "estimated"
-            block["estimation_reason"] = "activity_workday_window"
+            block.setdefault("estimation_reason", "activity_workday_window")
             start = datetime.datetime.combine(target_date, datetime.time.fromisoformat(block["start_time"]), tzinfo=tz)
             end = datetime.datetime.combine(target_date, datetime.time.fromisoformat(block["end_time"]), tzinfo=tz)
             block_bounds.append((start, end))

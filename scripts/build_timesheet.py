@@ -200,7 +200,9 @@ def build_entries(
             **({"time_basis": b["time_basis"]} if "time_basis" in b else {}),
             **({"attendance": "unconfirmed"} if b.get("time_basis") == "scheduled" else {}),
             **({"estimation_reason": b["estimation_reason"]} if "estimation_reason" in b else {}),
-            **({"calendar_overlap": True, "review": b["review"]} if b.get("calendar_overlap") else {}),
+            **({"estimation_policy": b["estimation_policy"]} if "estimation_policy" in b else {}),
+            **({"calendar_overlap": True} if b.get("calendar_overlap") else {}),
+            **({"review": b["review"]} if b.get("review") else {}),
             "entry": {
                 "date": date_str,
                 "start": start_time,

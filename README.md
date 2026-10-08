@@ -39,6 +39,18 @@ python3 scripts/setup_calendar_oauth.py --config config/user-config.json
 python3 scripts/get_calendar_activity.py --config config/user-config.json --date 2026-10-07
 ```
 
+For Codex CLI on macOS, use the project launcher when live collection needs the
+GitHub credential store and outbound Calendar access:
+
+```bash
+./bin/personal-timesheet-codex
+```
+
+The launcher starts a fresh Codex session in this repository with network access
+enabled and approval policy `on-request`. It uses `danger-full-access` because the
+standard workspace sandbox cannot read the host GitHub credential store. Review
+commands shown by Codex and use this launcher only for this trusted checkout.
+
 The bootstrap refuses to replace an existing token unless --replace is explicit.
 Collector calls use the authorized token and refresh it when needed. Every live
 pipeline preparation queries current events; it does not subscribe or run daily by
@@ -112,13 +124,16 @@ once; overlaps require attendance review. Original event/calendar IDs, source,
 response status and bounds remain audit evidence when available.
 
 A commit or PR action attaches only to its [start,end) interval. Unassigned evidence
-is retained separately and adds no duration. Estimated gaps require an activity
-inside them; timestamps do not prove continuous work. Current development windows
-are 09:00–12:00 / 13:30–17:30, lunch 12:00–13:30, minimum gap 30 minutes. Empty-Calendar
-fallback still uses 09:00–12:30 / 13:30–17:30, gated by activity per window. **D02 is
-deferred:** these rules are hardcoded; configurable schedules and BREAK/OT labeling
-are not implemented. Scheduled meetings during lunch or outside work hours remain
-proposals. Totals are Total Proposed Time when scheduled/estimated rows exist.
+is retained separately and adds no duration. With `block_policy.strategy` set to
+`activity_clusters`, development timestamps are grouped until the configured idle
+gap or maximum block length is reached. Boundaries are rounded to 15 minutes, kept
+within 09:00–12:00 / 13:30–17:30 and marked for human review. A dense batch of PR
+merges therefore supports one short administrative block rather than an entire
+half-day or one invented duration per PR. Profiles without an explicit policy retain
+the legacy half-day behavior so frozen snapshots remain reproducible. Timestamps do
+not prove continuous work. **D02 is deferred:** working schedules and BREAK/OT
+labeling are not configurable. Scheduled meetings during lunch or outside work hours
+remain proposals. Totals are Total Proposed Time when scheduled/estimated rows exist.
 
 PR scope (D04): selected GitHub repositories and confirmed accounts, with actual
 opened/reviewed/merged timestamps. Authored opening, submitted personal reviews and

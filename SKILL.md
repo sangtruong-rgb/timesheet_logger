@@ -77,8 +77,10 @@ print or commit credentials/token contents. Do not edit Calendar or infer attend
 6. Report source states, collection COMPLETE/INCOMPLETE/DEMO, output paths, fallback
    or AI summaries, and any unassigned/attendance review. Keep full-day future
    meetings as proposals: **Theo lịch, chưa xác nhận tham dự**. Scheduled/estimated
-   minutes are not measured work. BREAK/OT and configurable schedule policy remain
-   deferred. Never silently erase manual edits or migrate ambiguous old rows.
+   minutes are not measured work. Activity-cluster boundaries are inferred and must
+   be confirmed or overridden before publishing. BREAK/OT and configurable schedule
+   policy remain deferred. Never silently erase manual edits or migrate ambiguous
+   old rows.
 
 No automatic ticket clustering, judgment cache, daily scheduling or attendance
 confirmation is implemented. Reusing validated judgments with the same frozen

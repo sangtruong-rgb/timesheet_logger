@@ -86,6 +86,10 @@ def render_markdown(date_str: str, items: List[Dict[str, Any]], collection_statu
     has_overlap = any(item.get("calendar_overlap") for item in items)
     if has_overlap:
         lines[4:4] = ["> REVIEW REQUIRED: overlapping Calendar events need attendance confirmation. Scheduled coverage is not confirmed meeting time.", ""]
+    has_inferred_boundaries = any("inferred_activity_boundaries" in item.get("review", {}).get("reasons", [])
+                                  for item in items)
+    if has_inferred_boundaries:
+        lines[4:4] = ["> REVIEW REQUIRED: development boundaries were inferred from activity clusters; confirm them before publishing.", ""]
     if has_estimates:
         lines[4:4] = ["> Estimated intervals are proposals based on activity timestamps, not measured work time.", ""]
     if unassigned_activity:
@@ -111,6 +115,8 @@ def render_markdown(date_str: str, items: List[Dict[str, Any]], collection_statu
         if it.get("calendar_overlap"):
             overlap_minutes += dur
             duration_text += " — attendance review required"
+        elif "inferred_activity_boundaries" in it.get("review", {}).get("reasons", []):
+            duration_text += " — boundary review required"
         desc = markdown_cell(e.get("description", ""))
 
         src_parts = []

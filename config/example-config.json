@@ -25,6 +25,12 @@
     "token_path": "../token.json",
     "credentials_path": "../credentials.json"
   },
+  "block_policy": {
+    "strategy": "activity_clusters",
+    "inactivity_gap_minutes": 45,
+    "minimum_block_minutes": 30,
+    "maximum_block_minutes": 90
+  },
   "token_tracking": {
     "claude_dir": "~/.claude",
     "csv_path": "../data/token-usage.csv"
