@@ -21,7 +21,7 @@ def read_snapshot(path):
     try:
         snapshot = json.loads(Path(path).read_text(encoding="utf-8"))
         if (not isinstance(snapshot, dict) or type(snapshot.get('schema_version')) is not int
-                or snapshot['schema_version'] not in (1, 2, 3, 4)):
+                or snapshot['schema_version'] not in (1, 2, 3, 4, 5, 6)):
             raise ValueError("Unsupported snapshot")
         expected = snapshot["fingerprint"]
         body = {k: v for k, v in snapshot.items() if k != "fingerprint"}
@@ -29,6 +29,10 @@ def read_snapshot(path):
             raise ValueError("Snapshot fingerprint mismatch")
         if snapshot["collection"]["status"] not in ("complete", "demo") or not isinstance(snapshot["run_id"], str):
             raise ValueError("Unsuccessful or unidentified snapshot")
+        if (snapshot['schema_version'] >= 5) != ('work_schedule' in snapshot['normalized']):
+            raise ValueError('Snapshot schedule requires schema v5')
+        if (snapshot['schema_version'] >= 6) != ('windows' in snapshot['normalized'].get('work_confirmation', {})):
+            raise ValueError('Snapshot confirmed windows require schema v6')
         index_blocks(snapshot["blocks"])
         validate_unassigned_activity(snapshot["unassigned_activity"])
         if any(b["date"] != snapshot["normalized"]["date"] for b in snapshot["blocks"]):
@@ -53,8 +57,11 @@ def read_snapshot(path):
 
 def save_snapshot(path, normalized, collection, blocks, unassigned, ai_input, ai_export=None):
     path = Path(path)
-    # v4 freezes stable groups/merge associations; v1-v3 retain previous allocation.
-    body = {"schema_version": 4, "normalized": normalized, "collection": collection,
+    # v6 freezes explicit daily windows; older snapshots retain their rules.
+    version = (6 if 'windows' in normalized.get('work_confirmation', {}) else
+               5 if 'work_schedule' in normalized else 4)
+    body = {"schema_version": version,
+            "normalized": normalized, "collection": collection,
             "blocks": blocks, "unassigned_activity": unassigned, "ai_input": ai_input}
     extra = [ai_export] if ai_export else []
     try:

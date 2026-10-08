@@ -9,6 +9,7 @@ usage() {
 Usage:
   ./bin/personal-timesheet-codex
   ./bin/personal-timesheet-codex 09:00
+  ./bin/personal-timesheet-codex "8:00-12:00, 1h30-4:00"
   ./bin/personal-timesheet-codex "Chạy workflow cho ngày YYYY-MM-DD ..."
   ./bin/personal-timesheet-codex --check
 
@@ -16,8 +17,10 @@ This launcher opens a new Codex session with network and macOS credential-store
 access for the personal-timesheet skill. Codex still uses approval policy
 on-request. Run it only from this trusted checkout.
 
-A start time alone requests today's live-source preview. With no start time,
-the skill asks for it. Publishing requires an explicit request.
+A start time or a list of work windows requests today's live-source preview.
+Windows such as 8:00-12:00, 1h30-4:00 select 08:00-12:00 and 13:30-16:00.
+With no start or windows, the skill asks for the start. Publishing requires an
+explicit request.
 EOF
 }
 

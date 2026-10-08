@@ -75,6 +75,9 @@ descriptions for its pieces.
 Snapshot v4 assigns the group identity before splitting and before per-piece
 timestamp assignment. This keeps a start-minute commit from separating otherwise
 shared descriptions. V1-v3 snapshots reproduce their previous allocation behavior.
+New pipeline snapshots use v5 to freeze the configured work schedule as well.
+explicit `--work-windows` requests use v6 to freeze all confirmed daily windows.
+V1–v5 and their recorded usage remain readable. See [schedule policy](work-schedule.md).
 
 It uses a fresh, ephemeral, read-only CLI invocation without user config/rules,
 from the isolated run directory. A narrow `model_instructions_file` replaces coding

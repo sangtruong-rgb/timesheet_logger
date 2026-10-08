@@ -92,8 +92,28 @@ def render_markdown(date_str: str, items: List[Dict[str, Any]], collection_statu
         lines[4:4] = ["> REVIEW REQUIRED: development boundaries were inferred from activity clusters; confirm them before publishing.", ""]
     if has_estimates:
         lines[4:4] = ["> Estimated intervals are proposals based on activity timestamps, not measured work time.", ""]
+    schedules = []
+    for item in items:
+        if 'work_schedule' in item:
+            from work_schedule import validate_schedule
+            schedule = validate_schedule(item['work_schedule'])
+            if schedule not in schedules:
+                schedules.append(schedule)
+    confirmations = []
+    for item in items:
+        windows = item.get('work_confirmation', {}).get('windows')
+        if windows is not None and windows not in confirmations:
+            confirmations.append(windows)
+    for windows in confirmations:
+        hours = ', '.join(f"{w['start']}–{w['end']}" for w in windows)
+        lines[4:4] = [f"> Confirmed daily work windows: {hours}. Only these windows contribute time; gaps are excluded. They replace profile hours and breaks for this date.", ""]
+    for schedule in schedules if not confirmations else []:
+        breaks = ', '.join(f"{b['start']}–{b['end']}" for b in schedule['breaks']) or 'none'
+        overtime = ', '.join(f"{b['start']}–{b['end']}" for b in schedule['overtime_windows']) or 'none'
+        lines[4:4] = [f"> Configured work hours: {schedule['start']}–{schedule['end']}; breaks: {breaks}; overtime windows: {overtime}. Confirmed daily hours override regular hours and nonworking-day exclusions; configured breaks still apply.", ""]
     if any(item.get("estimation_policy", {}).get("strategy") == "commit_intervals" for item in items):
-        lines[4:4] = ["> Commit intervals: confirmed daily start → each closing commit; lunch 12:00–13:30 and scheduled Calendar intervals are excluded. Continuous work is assumed between commits. Time after the last commit is included only with a confirmed end. Closing commit evidence may describe multiple split rows.", ""]
+        exclusions = 'gaps outside confirmed windows' if confirmations else 'configured breaks' if schedules else 'lunch 12:00–13:30'
+        lines[4:4] = [f"> Commit intervals: confirmed daily start → each closing commit; {exclusions} and scheduled Calendar intervals are excluded. Continuous work is assumed between commits. Time after the last commit is included only with a confirmed end. Closing commit evidence may describe multiple split rows.", ""]
     if unassigned_activity:
         lines[4:4] = ["> REVIEW REQUIRED: some activity could not be assigned by timestamp. It contributes no work duration.", ""]
 
@@ -264,6 +284,12 @@ def reconcile_daily_entries(existing, incoming, target_date, collection_status):
         metadata = item.get("collection", {})
         if not isinstance(metadata, dict) or metadata.get("status", collection_status) != collection_status:
             raise TimesheetReconciliationError("Incoming row collection status does not match the successful snapshot")
+        if 'work_schedule' in item:
+            from work_schedule import validate_schedule
+            try:
+                validate_schedule(item['work_schedule'])
+            except ValueError as exc:
+                raise TimesheetReconciliationError('Incoming row work schedule is invalid') from exc
         if item["entry"]["description"].count("PRs:") != 1:
             raise TimesheetReconciliationError("Generated descriptions require exactly one script-owned PRs suffix")
         for field in ("commits", "pull_requests", "calendar_events", "calendar"):

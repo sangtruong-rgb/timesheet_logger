@@ -4,6 +4,35 @@ This log supersedes the unmeasured claims in improvement-log-legacy.md. That fil
 is a preserved historical artifact; 3,000–8,000 tokens, guaranteed <350 tokens and
 zero-waste results are withdrawn. There was no transcript evidence for those claims.
 
+## 2026-10-09 — configurable schedule and remaining token correctness cases
+
+Request: continue functional fixes and resume D02 with default 09:00–12:00 /
+13:30–17:30, allowing other schedules.
+
+Change: validate regular hours, multiple breaks, enabled weekdays, explicit holiday
+dates and optional overtime windows before collection; freeze the schedule in new
+v5 snapshots, final rows and collection metadata. Legacy/cluster proposals require
+evidence inside enabled windows; explicit daily confirmed hours allow nonworking
+dates/outside regular hours while retaining break/Calendar exclusion. New legacy
+morning fallback stops at 12:00; historical unscheduled v1-v4 behavior is preserved.
+Markdown reports configured breaks. Reject invalid boundaries, overlapping ranges,
+unsupported fields and nonexistent local times; changes require a new snapshot.
+
+Two F25-related bugs reproduced: daily totals counted duplicate CSV records twice
+(120 -> 240), and a newer transcript snapshot could hide conflicting older records
+at the same timestamp. Reporting/writes now share CSV identity/date validation;
+all scoped timestamp conflicts are checked independently of arrival order. Invalid
+history is blocked without replacement; unknown usage is not converted to zero.
+
+Validation: 593 tests pass, including frozen/changed schedules, default/historical
+morning behavior, breaks/meeting union, holidays/weekdays, overtime/midnight, DST,
+pre-collection failures, measured synthetic v5 assembly and preserved final files.
+Historical measured manifests still verify 6,182 and 6,966 tokens; the active live
+CSV remains byte-identical and reports 4,986. No new AI invocation or publication.
+F25 actual-Claude transcript acceptance and V01 installed-Claude/live acceptance
+remain pending: this environment has no Claude CLI or project transcripts.
+See docs/work-schedule.md for policy and acceptance limits.
+
 ## 2026-10-09 — stabilize allocation groups, record attempt costs and link boundary merges
 
 Problem: a start-minute commit timestamp-assigned to one piece changed its summary
@@ -202,3 +231,22 @@ V01; missing usage is unknown and does not rewrite old CSV.
 
 Result: validation results and acceptance limits are in docs/remaining-*-validation.md.
 D01/D03/D06 follow approved policy; configurable schedule and BREAK/OT remain D02.
+
+
+## 2026-10-09 — Explicit daily work windows
+
+Request: accept `$personal-timesheet 8:00-12:00, 1h30-4:00` and add a dedicated
+Codex skill for daily windows. Added `personal-timesheet-windows` with the shared
+workflow, and extended the existing skill and launcher documentation.
+
+Scripts parse the shorthand into 08:00–12:00 / 13:30–16:00 before collecting
+sources. `--work-windows` replaces profile hours/breaks only for the target run,
+excludes all gaps, clips Calendar proposals, retains excluded evidence for review,
+and includes the confirmed end tail. Snapshot v6 freezes canonical windows;
+v1–v5 retain their prior semantics. Commit merging under 20 work minutes and
+shared allocation descriptions remain intact. The default profile is unchanged.
+
+Validation: 609 tests passed, including 16 new parser/allocation/replay regressions
+and a synthetic Codex summary-to-assembly integration. Both Codex skills passed
+quick_validate; launcher syntax/help and git diff --check passed. No live source
+collection, model benchmark, publication, commit or push was performed for this change.

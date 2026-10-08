@@ -1,4 +1,4 @@
 interface:
   display_name: "Personal Timesheet"
-  short_description: "Check and submit evidence-backed daily work logs"
+  short_description: "Preview daily work with a start time or work windows"
   default_prompt: "Use $personal-timesheet to preview today's work from live GitHub and Google Calendar data. Ask for my start time if missing."

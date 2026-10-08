@@ -147,6 +147,7 @@ def _run():
     parser.add_argument("--max-remote-commits", type=int, default=10000)
     parser.add_argument("--work-start", help="Confirmed start HH:MM for the target day; selects commit_intervals")
     parser.add_argument("--work-end", help="Optional confirmed end HH:MM (or 24:00); requires --work-start")
+    parser.add_argument('--work-windows', help='Confirmed daily intervals, e.g. "8:00-12:00, 1h30-4:00"; replaces profile breaks')
     add_settings_arguments(parser)
     add_calendar_arguments(parser)
     parser.add_argument("--calendar-fixture", type=str, default=None, help="Explicit Calendar demo/test fixture")
@@ -166,7 +167,7 @@ def _run():
             print(f" OUTPUT PATH BLOCKED: {exc}; final files were not written.", file=sys.stderr)
             return 2
     if args.phase == "assemble":
-        if args.work_start is not None or args.work_end is not None:
+        if args.work_start is not None or args.work_end is not None or args.work_windows is not None:
             parser.error("assemble uses frozen confirmed hours; prepare a new snapshot to change them")
         if not args.snapshot:
             parser.error("assemble requires --snapshot; source collection is never repeated")
@@ -191,12 +192,31 @@ def _run():
         calendar_options = calendar_settings(args.config, args.calendar_token, args.calendar_credentials, args.calendar_ids)
         from block_settings import block_policy_settings, COMMIT_STRATEGY
         block_policy = block_policy_settings(args.config)
+        from work_schedule import schedule_settings, schedule_bounds, local_clock
+        work_schedule = schedule_settings(args.config)
         date_str = args.date or datetime.datetime.now(selected["timezone"]).date().isoformat()
-        datetime.date.fromisoformat(date_str)
+        target_date = datetime.date.fromisoformat(date_str)
+        if target_date.isoformat() != date_str:
+            raise ValueError('Target date must be canonical YYYY-MM-DD')
+        schedule_bounds({'work_schedule': work_schedule}, target_date, selected['timezone'])
         confirmation = None
-        if args.work_start is not None or args.work_end is not None or (block_policy or {}).get("strategy") == COMMIT_STRATEGY:
+        if args.work_windows is not None:
+            if args.work_start is not None or args.work_end is not None:
+                raise ValueError('--work-windows cannot be combined with --work-start or --work-end')
+            from work_windows import parse_work_windows
+            from commit_intervals import work_confirmation
+            windows = parse_work_windows(args.work_windows)
+            for window in windows:
+                for value in window.values():
+                    local_clock(target_date, value, selected['timezone'])
+            confirmation = work_confirmation(date_str, windows[0]['start'], windows[-1]['end'], windows=windows)
+            block_policy = {'strategy': COMMIT_STRATEGY}
+        elif args.work_start is not None or args.work_end is not None or (block_policy or {}).get("strategy") == COMMIT_STRATEGY:
             from commit_intervals import work_confirmation
             confirmation = work_confirmation(date_str, args.work_start, args.work_end)
+            for field in ('start', 'end'):
+                if field in confirmation:
+                    local_clock(target_date, confirmation[field], selected['timezone'])
             block_policy = {"strategy": COMMIT_STRATEGY}
     except (ValueError, OSError, KeyError) as exc:
         parser.error(str(exc))
@@ -248,6 +268,7 @@ def _run():
         "identity": selected["identity"],
         "repositories": selected["repos"],
         "timezone": selected["timezone_name"],
+        "work_schedule": work_schedule,
     }
     for name, source in collection["sources"].items():
         print(f"   {name}: {source['status']} ({source['mode']}, {source['count']} items)")
@@ -255,6 +276,7 @@ def _run():
     from normalize_activity import normalize_all, ActivityNormalizationError
     try:
         normalized = normalize_all(date_str, commits_data, pr_result["items"], cal_result["items"], selected["timezone_name"])
+        normalized['work_schedule'] = work_schedule
         if block_policy is not None:
             # Freeze the policy with the evidence so later assembly never depends
             # on mutable host configuration.

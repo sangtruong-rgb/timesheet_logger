@@ -110,6 +110,37 @@ class TestRunTokens(unittest.TestCase):
         update_csv(self.csv,[]); self.assertFalse(self.csv.exists())
         self.csv.write_text('corrupt but protected'); update_csv(self.csv,[]); self.assertEqual(self.csv.read_text(),'corrupt but protected')
 
+    def test_daily_report_blocks_duplicate_rows_without_rewriting_csv(self):
+        self.write([self.line()])
+        record = self.collect()
+        update_csv(self.csv, [record])
+        self.csv.write_text(self.csv.read_text() + self.csv.read_text().splitlines()[1] + '\n')
+        before = self.csv.read_bytes()
+        with self.assertRaisesRegex(ValueError, 'Duplicate'):
+            daily_totals(self.csv, '2026-10-07')
+        self.assertEqual(self.csv.read_bytes(), before)
+
+    def test_existing_attributed_identity_on_two_dates_blocks_reads_and_updates(self):
+        self.write([self.line()])
+        record = self.collect()
+        with self.csv.open('w', newline='') as stream:
+            writer = csv.DictWriter(stream, fieldnames=record)
+            writer.writeheader()
+            writer.writerows([record, {**record, 'date': '2026-10-08'}])
+        before = self.csv.read_bytes()
+        for action in (lambda: daily_totals(self.csv, '2026-10-07'),
+                       lambda: update_csv(self.csv, [{**record, 'session_id': 'another/run'}])):
+            with self.assertRaisesRegex(ValueError, 'execution dates'):
+                action()
+        self.assertEqual(self.csv.read_bytes(), before)
+
+    def test_daily_report_validates_header_and_canonical_date(self):
+        self.csv.write_text('garbage')
+        with self.assertRaisesRegex(ValueError, 'header'):
+            daily_totals(self.csv, '2026-10-07')
+        with self.assertRaisesRegex(ValueError, 'execution date'):
+            daily_totals(self.csv, '20261007')
+
     def test_csv_replace_failure_preserves_prior_bytes(self):
         self.write([self.line()]); r=self.collect(); update_csv(self.csv,[r]); before=self.csv.read_bytes()
         self.write([self.line(output=30)])
