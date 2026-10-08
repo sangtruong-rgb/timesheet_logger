@@ -117,8 +117,8 @@ class TestPipelineSources(unittest.TestCase):
         binary = self.cwd / "bin"
         binary.mkdir()
         gh = binary / "gh"
-        gh.write_text(f"#!{sys.executable}\nimport sys\nif sys.argv[1] == 'api': print('[]')\n")
-        gh.chmod(0o755)
+        from cli_fixture import write_python_cli
+        write_python_cli(gh, "import sys\nif sys.argv[1] == 'api': print('[]')\n")
         # Set an explicit remote slug only for this empty-live-source test.
         self.config.write_text(json.dumps({"author": {"names": ["Test User"]}, "github": {"users": ["test-user"]}, "timezone": "Asia/Ho_Chi_Minh"}))
         self.env["PATH"] = str(binary) + os.pathsep + self.env["PATH"]

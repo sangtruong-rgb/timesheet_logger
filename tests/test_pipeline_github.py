@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from cli_fixture import write_python_cli
 
 ROOT = Path(__file__).resolve().parent.parent
 DATE = '2026-10-06'
@@ -28,7 +29,7 @@ class TestGitHubPipeline(unittest.TestCase):
         binary = self.directory / 'bin'
         binary.mkdir()
         cli = binary / 'gh'
-        cli.write_text(f'#!{sys.executable}\n' + '''import json, os, sys
+        write_python_cli(cli, '''import json, os, sys
 if sys.argv[1] == 'auth': sys.exit(0)
 endpoint = sys.argv[4]
 with open(os.environ['REQUEST_LOG'], 'a') as log: log.write(endpoint+'\\n')
@@ -46,7 +47,6 @@ elif '/pulls?' in endpoint:
     print(json.dumps([pull(1, 'account-one'), pull(2, 'account-two'), pull(3, 'outsider')]))
 else: sys.exit(1)
 ''')
-        cli.chmod(0o755)
         self.requests = self.directory / 'requests.txt'
         self.env = dict(os.environ, PATH=str(binary)+os.pathsep+'/usr/bin:/bin', TZ='UTC', REQUEST_LOG=str(self.requests))
         for name in ['GH_TOKEN', 'GITHUB_TOKEN', 'PYTHONPATH']:

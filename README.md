@@ -2,12 +2,16 @@
 
 Build a reviewable daily proposal from real Git commits, GitHub PR actions and
 Google Calendar. Python performs collection, normalization, interval math, matching,
-validation and storage. AI optionally summarizes text; the CLI does not call an LLM.
+validation and storage. AI optionally summarizes text; the pipeline CLI does not
+call an LLM. The optional [Codex runner](docs/codex-usage.md) calls the installed CLI
+and records measured usage for its isolated summary invocation.
 GitHub and Google Calendar are supported. GitLab and ICS adapters are not implemented.
 
 ## Runtime and setup
 
 Hướng dẫn macOS/Linux trên máy công ty: [company-machine-run.md](docs/company-machine-run.md), gồm nguồn thật, skill và usage acceptance.
+
+Test bằng Codex CLI thay cho Claude: [cài CLI độc lập, venv và chạy pipeline](docs/codex-usage.md).
 
 Supported runtime: Python 3.11+ on macOS/Linux (POSIX file locks), plus Git. Validation
 here used Python 3.14.6; the minimum version has not been separately executed.
@@ -150,7 +154,12 @@ removed, Calendar-only blocks omit AI judgment, ticket IDs are extracted. Automa
 ticket clustering and a judgment cache do not exist. Supplied judgments can be reused
 explicitly with the same snapshot. See [workflow.md](workflow.md) for token targets.
 
-Record actual usage with a run manifest; no implicit whole-directory aggregation:
+For measured Codex usage, use the [Codex runner instructions](docs/codex-usage.md).
+It records one isolated summary invocation. CSV input excludes cached input so
+input + output + cache equals the provider total, without counting cache twice.
+Original Codex input/output/cache counts are preserved in attribution notes.
+
+For Claude, record actual usage with a run manifest; no implicit whole-directory aggregation:
 
 ```json
 {"run_id":"SNAPSHOT-RUN-ID","target_date":"2026-10-07","session_file":"/path/session.jsonl",
