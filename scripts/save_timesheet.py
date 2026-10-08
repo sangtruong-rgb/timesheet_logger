@@ -92,6 +92,8 @@ def render_markdown(date_str: str, items: List[Dict[str, Any]], collection_statu
         lines[4:4] = ["> REVIEW REQUIRED: development boundaries were inferred from activity clusters; confirm them before publishing.", ""]
     if has_estimates:
         lines[4:4] = ["> Estimated intervals are proposals based on activity timestamps, not measured work time.", ""]
+    if any(item.get("estimation_policy", {}).get("strategy") == "commit_intervals" for item in items):
+        lines[4:4] = ["> Commit intervals: confirmed daily start → each closing commit; lunch 12:00–13:30 and scheduled Calendar intervals are excluded. Continuous work is assumed between commits. Time after the last commit is included only with a confirmed end. Closing commit evidence may describe multiple split rows.", ""]
     if unassigned_activity:
         lines[4:4] = ["> REVIEW REQUIRED: some activity could not be assigned by timestamp. It contributes no work duration.", ""]
 

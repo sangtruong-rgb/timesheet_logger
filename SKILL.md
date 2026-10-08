@@ -9,6 +9,15 @@ Use scripts for collection, date/time math, matching, validation, suffixes, stor
 and token accounting. Use AI only to summarize the provided block text. Read
 [workflow.md](workflow.md) for policies and [README.md](README.md) for setup.
 
+Short invocation: `$personal-timesheet 09:00` confirms a 09:00 work start for today
+in the configured timezone and requests a live-source preview with `commit_intervals`.
+An explicit date overrides today. Use an isolated audit directory. Do not reconfirm
+the supplied start or ask for an optional end; without an end, stop at the last
+commit. If the start is missing or ambiguous, ask a short question for that fact.
+For other blockers, complete independent checks and ask only for the information
+or user action needed to continue. Never ask for credential contents. This shorthand
+does not authorize publishing. Explicit user instructions override these defaults.
+
 Resolve the bundle through `${CLAUDE_SKILL_DIR}`, never the invoking project's
 working directory. Paths below are placeholders, not shell angle-bracket syntax.
 Use the configured Python environment with optional Calendar libraries. Never read,
@@ -19,11 +28,17 @@ print or commit credentials/token contents. Do not edit Calendar or infer attend
    Create an isolated run directory under `${CLAUDE_SKILL_DIR}/data/audit/` for audits.
    Mark the skill run's aware start timestamp, session identity and usage message IDs
    when available. Record accurate boundaries; do not guess transcript identities.
-2. Prepare with quoted absolute paths:
+2. For the current `commit_intervals` policy, obtain the user's confirmed start
+   for the target day and pass `--work-start HH:MM`. Reuse an explicit confirmation
+   already supplied for that date; never infer 09:00 or reuse another day's hours.
+   Pass `--work-end HH:MM` only if the user confirms a finishing time; otherwise
+   stop at the last commit and report that remaining time is not included. Do not
+   ask about mid-session breaks. Prepare with quoted absolute paths:
 
    ```bash
    python3 "${CLAUDE_SKILL_DIR}/scripts/run_pipeline.py" --phase prepare \
      --config "${CLAUDE_SKILL_DIR}/config/user-config.json" --date YYYY-MM-DD \
+     --work-start "$TS_WORK_START" \
      --snapshot "${CLAUDE_SKILL_DIR}/data/audit/RUN/activity.json" \
      --export-ai-input "${CLAUDE_SKILL_DIR}/data/audit/RUN/ai-input.json" \
      --output-dir "${CLAUDE_SKILL_DIR}/data/audit/RUN/timesheets"
@@ -77,7 +92,13 @@ print or commit credentials/token contents. Do not edit Calendar or infer attend
 6. Report source states, collection COMPLETE/INCOMPLETE/DEMO, output paths, fallback
    or AI summaries, and any unassigned/attendance review. Keep full-day future
    meetings as proposals: **Theo lịch, chưa xác nhận tham dự**. Scheduled/estimated
-   minutes are not measured work. Activity-cluster boundaries are inferred and must
+   minutes are not measured work. Commit intervals allocate time from confirmed
+   start to each closing commit, subtract lunch 12:00–13:30 and Calendar coverage,
+   and have no 30-minute minimum or 90-minute cap. Split rows may share closing
+   commit evidence; this is completion context, not timestamp containment. PRs
+   never add duration. Confirmed hours are frozen in the snapshot; changes require
+   a new prepare run. An accepted commit-interval policy and confirmed daily hours
+   do not require another per-block boundary confirmation. Activity-cluster boundaries are inferred and must
    be confirmed or overridden before publishing. BREAK/OT and configurable schedule
    policy remain deferred. Never silently erase manual edits or migrate ambiguous
    old rows.

@@ -46,6 +46,19 @@ GitHub credential store and outbound Calendar access:
 ./bin/personal-timesheet-codex
 ```
 
+For a short request with your confirmed start time:
+
+```bash
+./bin/personal-timesheet-codex 09:00
+```
+
+Or type `$personal-timesheet 09:00` inside an existing Codex CLI session opened
+in this repository. This requests today's live-source preview with measured Codex
+summary usage when eligible. The skill asks for a missing start or other blocking
+information, without reconfirming supplied facts. An omitted end stops allocation
+at the last commit. Specify another date or an end in plain language when needed;
+publishing to Gradion requires an explicit request.
+
 The launcher starts a fresh Codex session in this repository with network access
 enabled and approval policy `on-request`. It uses `danger-full-access` because the
 standard workspace sandbox cannot read the host GitHub credential store. Review
@@ -83,7 +96,8 @@ settings fail; they never fall back to a guessed identity or host timezone.
 
 ```bash
 python3 scripts/run_pipeline.py --phase prepare --date 2026-10-07 \
-  --config config/user-config.json --snapshot data/audit/my-run/activity.json \
+  --config config/user-config.json --work-start 09:00 \
+  --snapshot data/audit/my-run/activity.json \
   --export-ai-input data/audit/my-run/ai-input.json \
   --output-dir data/audit/my-run/timesheets
 
@@ -123,7 +137,46 @@ to the selected local day and partitioned at overlaps, counting scheduled covera
 once; overlaps require attendance review. Original event/calendar IDs, source,
 response status and bounds remain audit evidence when available.
 
-A commit or PR action attaches only to its [start,end) interval. Unassigned evidence
+### Commit intervals (current profile)
+
+Set `block_policy` to `{"strategy": "commit_intervals"}`. Each run requires
+`--work-start HH:MM`, explicitly confirmed by the user for the selected date in the
+configured timezone. The example above uses an illustrative 09:00; never assume it.
+Passing `--work-start` also selects this strategy for older profiles. Optionally
+pass `--work-end HH:MM` (or `24:00`) to include work after the last commit. Without
+an end, allocation stops at the final commit. Neither clock is a reusable profile
+default. Prepare freezes the daily confirmation in the snapshot; assemble rejects
+clock overrides. Changed hours require a new snapshot.
+
+- Allocate confirmed start → first commit, then previous commit → next commit.
+- Subtract lunch **12:00–13:30** and the union of scheduled Calendar intervals.
+  A crossing interval becomes separate rows. Calendar rows remain scheduled,
+  attendance-unconfirmed proposals, including lunch/future events.
+- No mid-session breaks, idle-gap splitting, 30-minute minimum or 90-minute cap.
+  The confirmed start can be outside the old 09:00–17:30 work windows; no OT label
+  is inferred. This strategy assumes continuous work between commit boundaries.
+- Floor commit boundaries to the minute; retain original source timestamps.
+  Same-minute commits share an interval. The closing commits describe every split
+  piece, including a piece ending before lunch/a meeting. JSON `allocation` records
+  this relationship; the commit need not lie inside each piece. Do not count these
+  repeated source references as extra commits or extra time.
+- PR actions attach by [start,end) timestamp only and never create more time.
+  Events outside available intervals remain in review. Commits outside confirmed
+  hours do not extend development time. A commit exactly at start adds no time.
+- With no commits and no confirmed end, generate only Calendar rows. With both
+  confirmed hours, allocate that window minus lunch/Calendar, using generic text
+  when there is no activity. A tail after the last commit does not borrow its task.
+
+Example: start 09:00, commits 10:10 / 11:40 / 14:10 / 16:00, no Calendar:
+09:00–10:10 (70m), 10:10–11:40 (90m), 11:40–12:00 (20m),
+13:30–14:10 (40m), 14:10–16:00 (110m). Total: **330m proposed**.
+Confirmed hours and allocation metadata survive into the final JSON. Development
+remains `estimated`: commit boundaries allocate time, not measure task duration.
+
+### Previous policies and source scope
+
+Older strategies and frozen snapshots remain reproducible. In those strategies,
+a commit or PR action attaches only to its [start,end) interval. Unassigned evidence
 is retained separately and adds no duration. With `block_policy.strategy` set to
 `activity_clusters`, development timestamps are grouped until the configured idle
 gap or maximum block length is reached. Boundaries are rounded to 15 minutes, kept
@@ -131,8 +184,8 @@ within 09:00–12:00 / 13:30–17:30 and marked for human review. A dense batch 
 merges therefore supports one short administrative block rather than an entire
 half-day or one invented duration per PR. Profiles without an explicit policy retain
 the legacy half-day behavior so frozen snapshots remain reproducible. Timestamps do
-not prove continuous work. **D02 is deferred:** working schedules and BREAK/OT
-labeling are not configurable. Scheduled meetings during lunch or outside work hours
+not prove continuous work. Recurring schedules and BREAK/OT
+labeling remain unsupported. Scheduled meetings during lunch or outside work hours
 remain proposals. Totals are Total Proposed Time when scheduled/estimated rows exist.
 
 PR scope (D04): selected GitHub repositories and confirmed accounts, with actual

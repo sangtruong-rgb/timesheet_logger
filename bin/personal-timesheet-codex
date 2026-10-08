@@ -8,12 +8,16 @@ usage() {
   cat <<'EOF'
 Usage:
   ./bin/personal-timesheet-codex
+  ./bin/personal-timesheet-codex 09:00
   ./bin/personal-timesheet-codex "Chạy workflow cho ngày YYYY-MM-DD ..."
   ./bin/personal-timesheet-codex --check
 
 This launcher opens a new Codex session with network and macOS credential-store
 access for the personal-timesheet skill. Codex still uses approval policy
 on-request. Run it only from this trusted checkout.
+
+A start time alone requests today's live-source preview. With no start time,
+the skill asks for it. Publishing requires an explicit request.
 EOF
 }
 

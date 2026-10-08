@@ -3,6 +3,9 @@
 build_time_blocks.py - Deterministic time blocking and activity association.
 
 Rules:
+0. With commit_intervals, allocate the user's confirmed daily start to closing
+   commits, subtract lunch/Calendar, and include a tail only with confirmed end.
+   This strategy has no idle split, minimum block size or maximum block size.
 1. When calendar events exist:
    - Calendar events define explicit blocks (meetings, stand-ups, focus time).
    - Overlapping events are partitioned into disjoint intervals with all sources;
@@ -18,7 +21,8 @@ Rules:
    - Round inferred boundaries to 15 minutes inside work/lunch/Calendar bounds.
    - Dense PR batches stay in one short estimated block and require review.
    - Profiles and frozen snapshots without a policy retain the legacy fallback.
-3. Associate commits and PRs deterministically with time blocks based on timestamps.
+3. Associate commits and PRs deterministically with time blocks based on timestamps
+   (commit_intervals uses the closing commit as completion context).
    Preserve unmatched activity separately for review, never in an arbitrary block.
 4. Calculate duration in minutes/hours deterministically in code.
 """
@@ -31,7 +35,7 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 from block_identity import BlockIdentityError
 from activity_settings import resolve_timezone, timezone_settings
-from block_settings import CLUSTER_STRATEGY, policy_from_model
+from block_settings import CLUSTER_STRATEGY, COMMIT_STRATEGY, policy_from_model
 
 
 CLUSTER_ROUNDING_MINUTES = 15
@@ -138,6 +142,9 @@ def build_time_blocks(normalized_data: Dict[str, Any], *, unassigned_activity=No
     except ValueError as exc:
         raise BlockIdentityError(str(exc)) from exc
     clustered = block_policy["strategy"] == CLUSTER_STRATEGY
+    if block_policy["strategy"] == COMMIT_STRATEGY:
+        from commit_intervals import build_commit_intervals
+        return build_commit_intervals(normalized_data, target_date, tz, unassigned_activity)
 
     calendar = [ev for ev in normalized_data.get("calendar", [])
                 if not ev.get("all_day") and not (len(ev.get("start", "")) == 10 and len(ev.get("end", "")) == 10)]
