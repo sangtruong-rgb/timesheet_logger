@@ -9,7 +9,7 @@ blocks and never computes time, attendance, PR suffixes or storage ownership.
 | Collect | Script | Bounded Git author history, GitHub PR actions, paginated readonly Google Calendar; explicit source states |
 | Gate | Script | Failed/unavailable source → INCOMPLETE draft and exit 2; no sample substitution; explicit fixtures → DEMO |
 | Normalize | Script | Qualified identities, source schema, local-day conversion, dedup, retained invalid/unmatched timestamps |
-| Blocks | Script | Daily Calendar clipping/overlap union, all-day context excluded, evidence-gated estimated gaps, unassigned evidence retained |
+| Blocks | Script | Daily Calendar clipping/overlap union, all-day context excluded, bounded activity clusters for estimated development, unassigned evidence retained |
 | Prepare | Script | Deduplicated eligible text, ticket ID extraction only, exact byte limit, immutable snapshot and fingerprint/run ID; no final writes |
 | Summarize | AI, optional | Keyed concise descriptions for provided blocks; omit PR references; do not attach unmatched evidence |
 | Assemble | Script | Validate/rebuild same snapshot without recollection; keyed AI or per-block fallback; exactly one qualified PR suffix |
@@ -42,9 +42,10 @@ and override ownership; exact override suppresses an automatic interval, conflic
 intervals block. Legacy rows without provenance require classification, not deletion.
 
 D02 remains deferred. Hardcoded development windows: 09:00–12:00 / 13:30–17:30;
-lunch subtraction 12:00–13:30; minimum 30 minutes plus activity evidence per gap.
-No-Calendar fallback still has 09:00–12:30 / 13:30–17:30. Scheduled meetings remain
-whole during lunch/outside hours. No BREAK/OT classification or configured schedule.
+lunch subtraction 12:00–13:30. An explicit activity-cluster policy controls idle,
+minimum and maximum development block lengths, but every inferred boundary still
+requires review. Scheduled meetings remain whole during lunch/outside hours. No
+BREAK/OT classification or configured working schedule.
 
 ## Token Budget
 
@@ -60,7 +61,8 @@ an explicit larger bound. Do not claim a daily total below 600 or a payload belo
 
 Text is deduplicated, raw API metadata excluded from judgment, Calendar-only blocks
 use deterministic titles, and scripts do date math/suffix formatting. Ticket IDs are
-extracted; activities are not automatically clustered by ticket. No automatic AI
+extracted; development activity is clustered by time, not automatically by ticket.
+No automatic AI
 cache exists. Validated supplied judgments may be reused explicitly with the same
 frozen snapshot; a changed snapshot needs new judgment/review.
 

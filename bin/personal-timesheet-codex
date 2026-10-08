@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$root"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  ./bin/personal-timesheet-codex
+  ./bin/personal-timesheet-codex "Chạy workflow cho ngày YYYY-MM-DD ..."
+  ./bin/personal-timesheet-codex --check
+
+This launcher opens a new Codex session with network and macOS credential-store
+access for the personal-timesheet skill. Codex still uses approval policy
+on-request. Run it only from this trusted checkout.
+EOF
+}
+
+case "${1:-}" in
+  -h|--help)
+    usage
+    exit 0
+    ;;
+esac
+
+if ! command -v codex >/dev/null 2>&1; then
+  echo "Codex CLI is not available in PATH." >&2
+  echo "Start a login shell or add the Codex installation directory to PATH." >&2
+  exit 127
+fi
+
+if ! codex login status >/dev/null 2>&1; then
+  echo "Codex CLI is not logged in. Run: codex login" >&2
+  exit 2
+fi
+
+if ! command -v gh >/dev/null 2>&1 || ! gh auth status >/dev/null 2>&1; then
+  echo "GitHub CLI authentication is unavailable. Run: gh auth login -h github.com" >&2
+  exit 2
+fi
+
+if [[ ! -x .venv/bin/python ]]; then
+  echo "Repository .venv is missing. Create it with Python 3.11+ and install requirements-calendar.txt." >&2
+  exit 2
+fi
+
+if ! .venv/bin/python -c 'import google.auth, googleapiclient.discovery, google_auth_oauthlib.flow' >/dev/null 2>&1; then
+  echo "Google Calendar dependencies are missing from .venv." >&2
+  echo "Install requirements-calendar.txt into .venv before retrying." >&2
+  exit 2
+fi
+
+if [[ "${1:-}" == "--check" ]]; then
+  echo "Codex login: OK"
+  echo "GitHub authentication: OK"
+  echo "Python environment: OK"
+  echo "Google Calendar dependencies: OK"
+  exit 0
+fi
+
+request="${*:-Chạy workflow cho hôm nay bằng nguồn GitHub và Google Calendar thật. Chỉ tạo bản xem trước, chưa gửi lên Gradion. Báo actual Codex token usage ở cuối; nếu không có AI block thì ghi SKIPPED, không tự điền 0.}"
+
+# Live GitHub access needs the macOS credential store, and both live providers
+# need outbound network access. A normal workspace-write Codex sandbox hides
+# those capabilities even though the credentials remain valid on the host.
+exec codex \
+  --cd "$root" \
+  --sandbox danger-full-access \
+  --ask-for-approval on-request \
+  --config model_reasoning_effort=low \
+  "\$personal-timesheet $request"
