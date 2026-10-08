@@ -3,6 +3,43 @@
 The optional `run_codex_summary.py` runner calls the installed, authenticated Codex
 CLI once. `run_pipeline.py` remains deterministic and never launches an AI itself.
 No separate API key is required when the CLI already has working saved login.
+
+## Standalone CLI setup on macOS/Linux
+
+Install a standalone CLI so terminal execution does not depend on a VS Code
+extension directory. Version 0.160.1 is the version tested here, not a latest-version
+claim. Node/npm must already be available for this installation method:
+
+```bash
+npm install --global @openai/codex@0.160.1
+codex --version
+codex login status
+```
+
+If signed out, run `codex login` and complete the browser sign-in. An existing
+ChatGPT login is reused; do not copy or print auth.json. Check `command -v codex`
+from a regular terminal; an IDE can still put its bundled CLI first in PATH.
+The summary runner accepts `--codex /absolute/path/to/codex` for an explicit binary.
+
+From the repository root, create the local Python environment:
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements-calendar.txt
+source .venv/bin/activate
+python3 -m unittest discover -s tests
+```
+
+Keep the existing configured profile and readonly Calendar OAuth files local.
+GitHub must be authenticated through the configured mechanism. The live pipeline
+does not substitute fixtures when a source fails. No Claude installation or
+transcript is needed for the Codex summary flow below.
+
+Installation and login follow [OpenAI CLI setup](https://developers.openai.com/codex/cli/)
+and [OpenAI authentication](https://developers.openai.com/codex/auth/).
+
+## Run a Codex pipeline test
+
 Run these commands from the bundle with the configured Python environment active.
 Choose a new RUN directory for every fresh collection or AI invocation:
 
@@ -58,8 +95,11 @@ the existing CSV's non-overlapping columns:
 | output_tokens | provider output_tokens, including reasoning |
 | total_tokens | provider input_tokens plus provider output_tokens |
 
-Notes preserve the original provider counts and explain the conversion. No separate
-cache-creation count is exposed here and none is invented. Daily totals separate
+Notes preserve supported provider counts and explain the conversion. CLI 0.160.1
+also emitted `cache_write_input_tokens` in actual tests (zero); the raw event log
+retains it, but this adapter currently omits it from normalized provider_usage.
+Nonzero cache-write semantics are not validated; do not claim full coverage of
+that case or derive an exact bill. Daily totals separate
 `codex_exec`, Claude `transcript`, and `self_reported` provenance. Execution-start
 day is distinct from the timesheet target date. Reassembling the same snapshot,
 output and manifest upserts one record without rerunning AI or duplicating totals.

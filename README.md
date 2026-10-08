@@ -11,6 +11,8 @@ GitHub and Google Calendar are supported. GitLab and ICS adapters are not implem
 
 Hướng dẫn macOS/Linux trên máy công ty: [company-machine-run.md](docs/company-machine-run.md), gồm nguồn thật, skill và usage acceptance.
 
+Test bằng Codex CLI thay cho Claude: [cài CLI độc lập, venv và chạy pipeline](docs/codex-usage.md).
+
 Supported runtime: Python 3.11+ on macOS/Linux (POSIX file locks), plus Git. Validation
 here used Python 3.14.6; the minimum version has not been separately executed.
 Core scripts use the standard library. Live Calendar also requires:
