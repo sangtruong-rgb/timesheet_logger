@@ -7,11 +7,11 @@ No separate API key is required when the CLI already has working saved login.
 ## Standalone CLI setup on macOS/Linux
 
 Install a standalone CLI so terminal execution does not depend on a VS Code
-extension directory. Version 0.160.1 is the version tested here, not a latest-version
+extension directory. Version 0.161.0 is the version tested for compact summaries, not a latest-version
 claim. Node/npm must already be available for this installation method:
 
 ```bash
-npm install --global @openai/codex@0.160.1
+npm install --global @openai/codex@0.161.0
 codex --version
 codex login status
 ```
@@ -45,7 +45,9 @@ Choose a new RUN directory for every fresh collection or AI invocation:
 
 ```bash
 RUN="data/audit/codex-$(date +%Y%m%d-%H%M%S)"
+# Replace date and work-start with the user's confirmed daily values.
 python3 scripts/run_pipeline.py --phase prepare --date 2026-10-07 \
+  --work-start 09:00 \
   --config config/user-config.json --snapshot "$RUN/activity.json" \
   --export-ai-input "$RUN/ai-input.json" --output-dir "$RUN/timesheets"
 
@@ -60,11 +62,26 @@ python3 scripts/run_pipeline.py --phase assemble \
   --token-csv-path "$RUN/token-usage.csv" --output-dir "$RUN/timesheets"
 ```
 
-The runner sends only the frozen compact payload plus summary instructions, requests
-schema-conforming output and validates every eligible block. It uses a fresh,
-ephemeral, read-only CLI invocation without loading user config/rules. The prompt
-asks the agent not to use tools. CLI instructions and tool definitions still add
-context overhead; usage is not the payload's byte-derived token estimate.
+The default `compact` runner sends a text dictionary and summary jobs. Payload v3
+uses one job for the pieces of a commit allocation split by lunch/Calendar, combining
+their PR titles into shared context. Each piece receives the same topic description
+and its own script-generated PR suffix. Different allocations keep separate jobs
+even when their text matches. Frozen v1/v2 payloads retain their original semantic
+deduplication. The runner requests job IDs and maps the validated response back to
+every eligible block; canonical `ai-output.json` keeps block IDs. Assembly also shares
+deterministic fallback descriptions within a v3 group and rejects conflicting AI
+descriptions for its pieces.
+
+It uses a fresh, ephemeral, read-only CLI invocation without user config/rules,
+from the isolated run directory. A narrow `model_instructions_file` replaces coding
+instructions; project documents and host skill discovery are skipped. Shell,
+apps/plugins, browser/computer/image tools and delegation are disabled for this
+invocation, using features supported by tested CLI 0.161.0. Web search is disabled.
+These overrides do not edit the user's global settings. Strict configuration fails
+on unsupported settings rather than silently assuming the same context. CLI context
+still contributes to provider input; usage is not the request's byte heuristic.
+The runner defaults to reasoning `low`; `--model` and `--reasoning-effort` are explicit
+overrides. Model availability depends on the authenticated account.
 No eligible blocks means the runner exits 2 without calling AI; use deterministic
 assembly without an AI output/usage manifest instead.
 
@@ -72,6 +89,10 @@ assembly without an AI output/usage manifest instead.
 `ai-output.json` contains validated keyed judgments. The success manifest records
 the snapshot run ID, target date, exact thread identity, aware invocation boundaries,
 successful process exit, payload fingerprint and hashes of snapshot/output/event log.
+New `codex_exec_run_v2` manifests also retain the actual request, prompt, instructions,
+schema, raw response, command, CLI version and requested model/reasoning. Attribution
+rebuilds the request from the frozen snapshot and verifies the raw job-to-block
+mapping against canonical judgments. Existing v1 manifests remain supported.
 No session history is scanned. Hashes detect changes; they are not digital signatures.
 Keep artifacts private in ignored data/audit; never publish authentication files.
 
@@ -81,6 +102,27 @@ events, changed evidence or conflicting target/run/output blocks attribution. A
 failed/timeout invocation retains diagnostics but publishes no success manifest.
 Usage can still have been consumed on a failed request; it is not recorded as zero.
 Unsupported schemas need a verified adapter, not fabricated values.
+
+## Before/after benchmark
+
+Use one complete frozen snapshot and pin the same available model for both strategies:
+
+```bash
+python3 scripts/benchmark_codex_summary.py --snapshot "$RUN/activity.json" \
+  --run-dir "$RUN/benchmark" --model gpt-6.1-sol --codex /absolute/path/to/codex
+```
+
+`legacy` reproduces the former full audit prompt and coding context; `compact` uses
+the new request and narrow context. Both use reasoning `low`. Each invokes AI once;
+these are real token-consuming calls. Results include provider input/cached/output,
+total input + output, prompt bytes and wall time. Structural checks preserve times,
+source evidence and metadata; review descriptions for meaning. One pair does not
+establish a statistical average. Cached input stays inside provider input when
+reporting token reduction. `--resume` verifies completed evidence before reusing it
+and creates a new retry directory for unfinished strategies, preserving failures.
+No timesheet is published by the benchmark. Its own usage CSV stays in its run directory.
+
+Configuration reference: [Codex configuration](https://developers.openai.com/codex/config-reference/).
 
 ## Counts and scope
 

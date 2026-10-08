@@ -82,6 +82,16 @@ class TestActivityClusters(unittest.TestCase):
                           ("10:00", "10:30", "estimated"),
                           ("15:00", "15:30", "estimated")])
 
+    def test_evening_calendar_does_not_extend_development_windows(self):
+        review = []
+        blocks = build_time_blocks(model(calendar=[event('20:00', '21:00')],
+                                         commits=[commit('15:00', 'daytime'), commit('19:00', 'evening')]),
+                                   unassigned_activity=review)
+        self.assertEqual([(b['start_time'], b['end_time'], b['time_basis']) for b in blocks],
+                         [('15:00', '15:30', 'estimated'), ('20:00', '21:00', 'scheduled')])
+        self.assertEqual([c['hash'] for b in blocks for c in b['commits']], ['daytime'])
+        self.assertEqual([(r['reason'], r['activity']['hash']) for r in review], [('outside_blocks', 'evening')])
+
     def test_clusters_never_cross_lunch_and_lunch_evidence_is_unassigned(self):
         review = []
         blocks = build_time_blocks(model(commits=[commit("11:55", "before"), commit("12:30", "lunch"),

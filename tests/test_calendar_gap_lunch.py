@@ -54,6 +54,60 @@ class TestCalendarGapLunch(unittest.TestCase):
         blocks = build_time_blocks(model([event(), event('17:30', '18:00', 'Wrap-up')], [commit('10:00'), commit('15:00', 'afternoon')]))
         self.assertEqual(estimates(blocks), [('09:30', '12:00', 150), ('13:30', '17:30', 240)])
 
+    def test_evening_activity_before_evening_meeting_creates_no_development(self):
+        activity = commit('19:00')
+        meeting = event('20:00', '21:00', 'Evening meeting')
+        unassigned = []
+        blocks = build_time_blocks(model([meeting], [activity]), unassigned_activity=unassigned)
+        self.assertEqual(estimates(blocks), [])
+        self.assertEqual([(b['start_time'], b['end_time'], b['duration_minutes'], b['time_basis'])
+                          for b in blocks], [('20:00', '21:00', 60, 'scheduled')])
+        self.assertEqual(blocks[0]['calendar_events'], [meeting])
+        self.assertEqual(unassigned, [{'source': 'git', 'reason': 'outside_blocks', 'activity': activity}])
+
+    def test_supported_gap_before_evening_meeting_ends_at_workday_end(self):
+        daytime, evening = commit('15:00', 'daytime'), commit('19:00', 'evening')
+        unassigned = []
+        blocks = build_time_blocks(model([event(), event('20:00', '21:00')], [daytime, evening]),
+                                   unassigned_activity=unassigned)
+        self.assertEqual(estimates(blocks), [('13:30', '17:30', 240)])
+        self.assertEqual([c for b in blocks for c in b['commits']], [daytime])
+        self.assertEqual(unassigned, [{'source': 'git', 'reason': 'outside_blocks', 'activity': evening}])
+
+    def test_gap_between_evening_meetings_does_not_create_development_from_pr(self):
+        pr = {'id': 101, 'repository': 'test/project', 'title': 'Payment', 'events': [
+            {'action': 'reviewed', 'timestamp': f'{DATE}T19:00:00+07:00', 'id': 1}]}
+        unassigned = []
+        blocks = build_time_blocks(model([event('18:00', '18:30'), event('20:00', '21:00')], prs=[pr]),
+                                   unassigned_activity=unassigned)
+        self.assertEqual(estimates(blocks), [])
+        self.assertEqual(sum(b['duration_minutes'] for b in blocks), 90)
+        self.assertEqual([e for record in unassigned for e in record['activity']['events']], pr['events'])
+        self.assertEqual(unassigned[0]['reason'], 'outside_blocks')
+
+    def test_workday_end_is_exclusive_with_local_and_utc_activity(self):
+        for timestamp, supported in ((f'{DATE}T17:29:00+07:00', True),
+                                     (f'{DATE}T17:30:00+07:00', False),
+                                     (f'{DATE}T10:29:00Z', True), (f'{DATE}T10:30:00Z', False)):
+            with self.subTest(timestamp=timestamp):
+                activity = {**commit(), 'timestamp': timestamp}
+                unassigned = []
+                blocks = build_time_blocks(model([event('20:00', '21:00')], [activity]),
+                                           unassigned_activity=unassigned)
+                self.assertEqual(estimates(blocks), [('13:30', '17:30', 240)] if supported else [])
+                self.assertEqual([c for b in blocks for c in b['commits']], [activity] if supported else [])
+                self.assertEqual(len(unassigned), 0 if supported else 1)
+
+    def test_minimum_gap_duration_applies_after_workday_clipping(self):
+        for end, expected in (('17:00', [('17:00', '17:30', 30)]), ('17:15', [])):
+            with self.subTest(end=end):
+                activity = commit('17:20')
+                unassigned = []
+                blocks = build_time_blocks(model([event('13:30', end), event('20:00', '21:00')], [activity]),
+                                           unassigned_activity=unassigned)
+                self.assertEqual(estimates(blocks), expected)
+                self.assertEqual(len(unassigned), 0 if expected else 1)
+
     def test_gap_entirely_inside_lunch_creates_no_development(self):
         calendars = [event('09:00', '12:00', 'Focus'), event('13:00', '17:30', 'Workshop')]
         unassigned = []

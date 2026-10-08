@@ -112,6 +112,20 @@ class TestPipelineReconciliation(unittest.TestCase):
         self.assertEqual(len(draft["proposed_entries"]), 1)
         self.assertIn("overlaps", draft["reconciliation"]["reason"])
 
+    def test_generated_overlap_blocks_bundle_and_retains_proposed_rows_in_draft(self):
+        self.assertEqual(self.pipeline([self.block('09:00', '12:00', 180)]), 0)
+        original = self.protected()
+        blocks = [self.block('09:00', '11:00', 120), self.block('10:00', '12:00', 120)]
+        self.assertEqual(self.pipeline(blocks), 2)
+        self.assert_preserved(original)
+        draft = json.loads((self.output / 'drafts' / f'{DATE}.json').read_text())
+        self.assertEqual(draft['reconciliation']['status'], 'blocked')
+        self.assertIn('overlap', draft['reconciliation']['reason'])
+        self.assertEqual([(r['entry']['start'], r['entry']['end']) for r in draft['proposed_entries']],
+                         [('09:00', '11:00'), ('10:00', '12:00')])
+        self.assertIn('RECONCILIATION BLOCKED', self.stderr.getvalue())
+        self.assertNotIn('successfully completed', self.stdout.getvalue())
+
     def test_demo_empty_rerun_only_clears_demo_generated_rows(self):
         self.assertEqual(self.pipeline([self.block("09:00", "12:00", 180)]), 0)
         original = self.protected()

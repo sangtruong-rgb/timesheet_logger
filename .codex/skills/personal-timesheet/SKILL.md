@@ -111,9 +111,19 @@ Omit all three AI/usage arguments when no block needs an AI summary. Do not coll
 - Under the accepted `commit_intervals` policy, allocate confirmed start → first
   commit, then commit → commit, subtracting lunch 12:00–13:30 and Calendar coverage.
   This explicitly assumes continuous work between boundaries; it does not measure
-  task duration. There is no 30-minute floor, 90-minute cap or mid-session break.
+  task duration. A commit allocation with 1–19 work minutes after exclusions merges
+  into the previous commit allocation, preserving all commit/PR evidence; consecutive
+  short allocations accumulate backward. Keep the first allocation when no predecessor
+  exists, zero-work allocations, 20 minutes or more and confirmed-end tails separate.
+  Decide merging before splitting around lunch/Calendar; never fill excluded time or
+  pad a short allocation to 20 minutes. New snapshots freeze this rule; existing
+  snapshots retain their original intervals. There is no 90-minute cap or mid-session break.
   The closing commit describes all split pieces of that interval and may occur
-  outside a piece. PR actions add context without adding time. An accepted policy
+  outside a piece. New payloads use one shared topic description for pieces of the
+  same allocation, combining PR context while preserving each row's own PR suffix,
+  evidence and hours. Different allocations keep separate descriptions; frozen
+  older payloads retain their original behavior. PR actions add context without
+  adding time. An accepted policy
   plus confirmed daily hours does not require another per-block boundary approval.
 - Treat `inferred_activity_boundaries` as review-required. Report the clustered intervals and do not publish them until the user confirms or overrides their start/end times.
 - Do not attach unassigned activity to a block or invent its duration.

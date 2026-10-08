@@ -105,7 +105,8 @@ class TestRemainingStorage(unittest.TestCase):
         size = len(json.dumps(payload, indent=2).encode('utf-8'))
         self.assertEqual(payload['payload_measurement']['serialized_bytes'], size)
         self.assertEqual(len(payload['blocks']), 1)
-        with self.assertRaises(BlockIdentityError): prepare_activity_input(blocks, self.review, size-10)
+        model_size = payload['payload_measurement']['model_payload_bytes']
+        with self.assertRaises(BlockIdentityError): prepare_activity_input(blocks, self.review, model_size-1)
         self.assertFalse(payload['payload_measurement']['token_count_is_exact'])
 
     def test_ai_cannot_duplicate_or_scatter_pr_references(self):

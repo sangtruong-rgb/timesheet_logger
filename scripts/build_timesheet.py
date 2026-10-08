@@ -153,14 +153,49 @@ def map_ai_judgments(block_by_id, judgments):
     return mapped
 
 
+def shared_group_descriptions(block_by_id, ai_by_key, groups):
+    """Reuse one topic per allocation; keep each row's source lists and PR suffix."""
+    from summary_request import commit_summary_group_id
+    if groups is None:
+        return {}
+    if not isinstance(groups, dict):
+        raise AIJudgmentError('Summary groups must be a keyed mapping')
+    shared = {}
+    for group, keys in groups.items():
+        if not isinstance(keys, list) or not keys:
+            raise AIJudgmentError('Summary group requires block IDs')
+        seen = set()
+        for key in keys:
+            if (not isinstance(key, str) or key not in block_by_id or key in shared
+                    or key in seen
+                    or commit_summary_group_id(block_by_id[key]) != group):
+                raise AIJudgmentError('Summary group conflicts with candidate allocations')
+            seen.add(key)
+        matches = [ai_by_key[key] for key in keys if key in ai_by_key]
+        if matches:
+            descriptions = {m['description'].strip().rstrip('.') for m in matches}
+            if len(descriptions) != 1:
+                raise AIJudgmentError('Pieces of one commit allocation require one shared AI description')
+            description, from_ai = matches[0]['description'].strip(), True
+        else:
+            combined = {**block_by_id[keys[0]],
+                        'prs': [p for key in keys for p in block_by_id[key].get('prs', [])]}
+            description, from_ai = synthesize_deterministic_summary(combined), False
+        for key in keys:
+            shared[key] = (description, from_ai)
+    return shared
+
+
 def build_entries(
     blocks: List[Dict[str, Any]],
-    ai_judgments: Optional[List[Dict[str, Any]]] = None
+    ai_judgments: Optional[List[Dict[str, Any]]] = None,
+    *, summary_groups=None
 ) -> List[Dict[str, Any]]:
     entries = []
 
     block_by_id = index_blocks(blocks)
     ai_by_key = map_ai_judgments(block_by_id, ai_judgments)
+    shared = shared_group_descriptions(block_by_id, ai_by_key, summary_groups)
 
     for key, b in block_by_id.items():
         date_str = b.get("date", "")
@@ -176,6 +211,8 @@ def build_entries(
         # Resolve topic summary
         topic_summary = ""
         ai_match = ai_by_key.get(key)
+        if key in shared and shared[key][1]:
+            ai_match = {'description': shared[key][0]}
         if ai_match and ai_match.get("description"):
             topic_summary = ai_match["description"].strip()
             if not topic_summary.endswith("."):
@@ -183,7 +220,7 @@ def build_entries(
             if b.get("calendar_overlap"):
                 topic_summary = "Calendar overlap — attendance confirmation required. " + topic_summary
         else:
-            topic_summary = synthesize_deterministic_summary(b)
+            topic_summary = shared[key][0] if key in shared else synthesize_deterministic_summary(b)
             topic_summary = re.sub(r"\bPRs\s*:.*", "", topic_summary, flags=re.IGNORECASE).strip()
             topic_summary = re.sub(r"#[0-9]+\b", "", topic_summary)
             topic_summary = " ".join(topic_summary.split()).strip() or "Activity recorded."
@@ -238,8 +275,20 @@ def main():
         sys.exit(1)
 
     try:
-        blocks, unassigned = unpack_activity_snapshot(json.loads(b_path.read_text(encoding="utf-8")), "blocks")
-        entries = build_entries(blocks, load_ai_judgments(args.ai_output))
+        data = json.loads(b_path.read_text(encoding="utf-8"))
+        blocks, unassigned = unpack_activity_snapshot(data, "blocks")
+        from prepare_ai_input import prepare_all_blocks
+        from summary_request import commit_group_mapping
+        version = 3
+        if isinstance(data, dict) and 'ai_input' in data:
+            if not isinstance(data['ai_input'], dict):
+                raise AIJudgmentError('Invalid frozen AI input')
+            version = data['ai_input'].get('payload_version', 1)
+            if type(version) is not int or version not in (1, 2, 3):
+                raise AIJudgmentError('Unsupported frozen AI payload version')
+        payloads = prepare_all_blocks(blocks, include_summary_groups=version >= 3)
+        entries = build_entries(blocks, load_ai_judgments(args.ai_output),
+                                summary_groups=commit_group_mapping(payloads))
     except (ValueError, OSError) as exc:
         print(f"AI/block validation failed: {exc}", file=sys.stderr)
         return 2

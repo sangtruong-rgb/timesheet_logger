@@ -152,7 +152,14 @@ clock overrides. Changed hours require a new snapshot.
 - Subtract lunch **12:00–13:30** and the union of scheduled Calendar intervals.
   A crossing interval becomes separate rows. Calendar rows remain scheduled,
   attendance-unconfirmed proposals, including lunch/future events.
-- No mid-session breaks, idle-gap splitting, 30-minute minimum or 90-minute cap.
+- If a commit allocation has **1–19 work minutes after these exclusions**, merge
+  it into the previous commit allocation, retaining every commit and PR. Consecutive
+  short allocations merge backward into the same group. The first allocation stays
+  separate when there is no predecessor; 20 minutes or more stays separate. A
+  zero-work allocation stays separate for Calendar/review assignment. A confirmed-end
+  tail is not a commit allocation and does not merge. Apply this rule before splitting
+  at lunch/Calendar: a short piece of a longer allocation does not trigger a merge.
+- No mid-session breaks, idle-gap splitting, padding to 20 minutes or 90-minute cap.
   The confirmed start can be outside the old 09:00–17:30 work windows; no OT label
   is inferred. This strategy assumes continuous work between commit boundaries.
 - Floor commit boundaries to the minute; retain original source timestamps.
@@ -172,6 +179,10 @@ Example: start 09:00, commits 10:10 / 11:40 / 14:10 / 16:00, no Calendar:
 13:30–14:10 (40m), 14:10–16:00 (110m). Total: **330m proposed**.
 Confirmed hours and allocation metadata survive into the final JSON. Development
 remains `estimated`: commit boundaries allocate time, not measure task duration.
+For example, commits at 10:00 / 10:10 / 10:25 become one 09:00–10:25 row (85m),
+containing all three commits. New snapshots use schema v3 to freeze the under-20-minute
+rule; v2 snapshots retain under-30-minute merging and v1 retains unmerged intervals. Changed allocations require
+a new prepare snapshot.
 
 ### Previous policies and source scope
 
@@ -215,12 +226,23 @@ may see intermediate files; this is recoverable multi-file storage.
 
 ## Token usage
 
-Payload export reports exact serialized bytes and a bytes/4 heuristic, not an exact
-tokenizer count. Default maximum is 12000 bytes including metadata, overridable with
---max-ai-input-bytes. Overflow blocks without dropping evidence. Duplicate text is
-removed, Calendar-only blocks omit AI judgment, ticket IDs are extracted. Automatic
-ticket clustering and a judgment cache do not exist. Supplied judgments can be reused
-explicitly with the same snapshot. See [workflow.md](workflow.md) for token targets.
+Payload v3 exports an audit envelope plus a compact `summary_request`. Text is stored
+once and referenced by summary jobs. Pieces of one commit allocation split by
+lunch/Calendar share one job and description, using the combined PR context of
+those pieces. Different commit allocations keep separate jobs even when their text
+matches. Python maps jobs back to the original block IDs and appends each block's
+own PR references. Frozen v1/v2 payloads retain their original summary behavior.
+Times, source evidence
+and unassigned review stay in the snapshot. Calendar-only rows use deterministic
+descriptions. No persistent judgment cache is implemented.
+
+`serialized_bytes` measures the full audit export; `model_payload_bytes` measures
+the exact compact UTF-8 request. The bytes/4 estimate is a heuristic for the request,
+not an exact tokenizer count. The default 12000-byte guard bounds this request,
+overridable with --max-ai-input-bytes. Overflow blocks without dropping evidence.
+Legacy snapshots retain their original full-export guard and remain readable.
+Supplied judgments can be reused explicitly with the same snapshot.
+See [workflow.md](workflow.md) for token targets.
 
 For measured Codex usage, use the [Codex runner instructions](docs/codex-usage.md).
 It records one isolated summary invocation. CSV input excludes cached input so

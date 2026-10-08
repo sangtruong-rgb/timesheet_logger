@@ -5,7 +5,8 @@ build_time_blocks.py - Deterministic time blocking and activity association.
 Rules:
 0. With commit_intervals, allocate the user's confirmed daily start to closing
    commits, subtract lunch/Calendar, and include a tail only with confirmed end.
-   This strategy has no idle split, minimum block size or maximum block size.
+   Merge commit allocations under 20 work minutes into the previous allocation;
+   there is no idle split, padding to a minimum or maximum block size.
 1. When calendar events exist:
    - Calendar events define explicit blocks (meetings, stand-ups, focus time).
    - Overlapping events are partitioned into disjoint intervals with all sources;
@@ -14,8 +15,9 @@ Rules:
      All-day events belong to audit context and never form timed work blocks.
    - Development gaps require a timestamped commit/PR inside their interval.
      These durations are estimated, not proof of continuous work.
-   - All development gaps exclude 12:00–13:30 before checking activity.
-     Scheduled Calendar events during lunch are retained.
+   - Calendar development gaps are restricted to 09:00–12:00 / 13:30–17:30
+     before checking activity. Scheduled Calendar events outside these windows
+     are retained.
 2. With an explicit activity-cluster policy:
    - Group timestamped development actions by idle gap and maximum duration.
    - Round inferred boundaries to 15 minutes inside work/lunch/Calendar bounds.
@@ -35,7 +37,7 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 from block_identity import BlockIdentityError
 from activity_settings import resolve_timezone, timezone_settings
-from block_settings import CLUSTER_STRATEGY, COMMIT_STRATEGY, policy_from_model
+from block_settings import CLUSTER_STRATEGY, COMMIT_STRATEGY, policy_from_model, SHORT_COMMIT_MERGE_MINUTES
 
 
 CLUSTER_ROUNDING_MINUTES = 15
@@ -121,7 +123,9 @@ def activity_cluster_bounds(start, end, activities, policy):
     return clusters
 
 
-def build_time_blocks(normalized_data: Dict[str, Any], *, unassigned_activity=None) -> List[Dict[str, Any]]:
+def build_time_blocks(normalized_data: Dict[str, Any], *, unassigned_activity=None,
+                      merge_short_commits=True,
+                      short_commit_merge_minutes=SHORT_COMMIT_MERGE_MINUTES) -> List[Dict[str, Any]]:
     """Build timed proposals; callers persisting evidence must collect unassigned_activity."""
     if unassigned_activity is not None:
         from copy import deepcopy
@@ -144,7 +148,9 @@ def build_time_blocks(normalized_data: Dict[str, Any], *, unassigned_activity=No
     clustered = block_policy["strategy"] == CLUSTER_STRATEGY
     if block_policy["strategy"] == COMMIT_STRATEGY:
         from commit_intervals import build_commit_intervals
-        return build_commit_intervals(normalized_data, target_date, tz, unassigned_activity)
+        return build_commit_intervals(normalized_data, target_date, tz, unassigned_activity,
+                                      merge_short_commits=merge_short_commits,
+                                      short_commit_merge_minutes=short_commit_merge_minutes)
 
     calendar = [ev for ev in normalized_data.get("calendar", [])
                 if not ev.get("all_day") and not (len(ev.get("start", "")) == 10 and len(ev.get("end", "")) == 10)]
@@ -222,10 +228,10 @@ def build_time_blocks(normalized_data: Dict[str, Any], *, unassigned_activity=No
         cur_cursor = day_start
 
         def append_development_gap(start, end):
-            # Subtract lunch first. Cluster mode then narrows the candidate gap
-            # around timestamped activity instead of claiming the whole gap.
-            for gap_start, gap_end in ((start, min(end, lunch_start)),
-                                       (max(start, lunch_end), end)):
+            # Intersect gaps with work windows before checking duration/activity.
+            # Cluster mode then narrows each gap around timestamped activity.
+            for window_start, window_end in ((day_start, lunch_start), (lunch_end, day_end)):
+                gap_start, gap_end = max(start, window_start), min(end, window_end)
                 minimum = block_policy.get("minimum_block_minutes", 30) if clustered else 30
                 if (gap_end - gap_start).total_seconds() < minimum * 60:
                     continue
@@ -477,4 +483,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

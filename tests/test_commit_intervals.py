@@ -1,4 +1,4 @@
-"""Confirmed daily hours allocated to commit endpoints, with no fixed block size."""
+"""Confirmed hours and backward merging preserve evidence and excluded time."""
 import contextlib
 import io
 import json
@@ -14,7 +14,8 @@ from block_identity import BlockIdentityError, index_blocks
 from block_settings import policy_from_model
 from build_time_blocks import build_time_blocks
 from build_timesheet import build_entries
-from activity_snapshot import read_snapshot
+from activity_snapshot import read_snapshot, save_snapshot, fingerprint, SnapshotError
+from prepare_ai_input import prepare_activity_input
 from run_pipeline import run
 from save_timesheet import render_markdown
 from test_activity_clusters import DATE, commit, event, pr
@@ -45,9 +46,115 @@ class TestCommitIntervals(unittest.TestCase):
         self.assertEqual([b["commits"][0]["hash"] for b in blocks], ["10:10", "11:40", "14:10", "14:10", "16:00"])
         self.assertEqual(sum(b["duration_minutes"] for b in blocks), 330)
 
-    def test_one_minute_and_long_intervals_have_no_cluster_limits(self):
+    def test_first_short_and_long_intervals_are_not_padded_or_capped(self):
         blocks = build_time_blocks(model([commit("09:01", "a"), commit("11:59", "b")]))
         self.assertEqual(intervals(blocks), [("09:00", "09:01", 1), ("09:01", "11:59", 178)])
+
+    def test_consecutive_short_commits_merge_backward_with_all_evidence(self):
+        activities = [commit(t, name) for t, name in [('10:00', 'a'), ('10:10', 'b'),
+                                                      ('10:25', 'c'), ('10:55', 'd')]]
+        blocks = build_time_blocks(model(activities, prs=[pr('10:15', 1), pr('10:25', 2)]))
+        self.assertEqual(intervals(blocks), [('09:00', '10:25', 85), ('10:25', '10:55', 30)])
+        self.assertEqual([[c['hash'] for c in b['commits']] for b in blocks], [['a', 'b', 'c'], ['d']])
+        self.assertEqual([[p['id'] for p in b['prs']] for b in blocks], [[1], [2]])
+        self.assertEqual(len(blocks[0]['allocation']['merged_intervals']), 3)
+        self.assertEqual(blocks[0]['allocation']['short_commit_merge_minutes'], 20)
+        payload = prepare_activity_input(blocks, [])
+        self.assertEqual(set(payload['blocks'][0]['commit_messages']), {'work a', 'work b', 'work c'})
+        entries = build_entries(blocks)
+        self.assertEqual(len(entries[0]['sources']['commits']), 3)
+        self.assertEqual(sum(b['duration_minutes'] for b in blocks), 115)
+        self.assertEqual(blocks, build_time_blocks(model(list(reversed(activities)), prs=[pr('10:15', 1), pr('10:25', 2)])))
+
+    def test_19_minutes_merges_but_20_29_and_30_stay_separate(self):
+        blocks = build_time_blocks(model([commit('10:00', 'a'), commit('10:19', 'b'),
+                                         commit('10:39', 'c'), commit('11:08', 'd'), commit('11:38', 'e')]))
+        self.assertEqual(intervals(blocks), [('09:00', '10:19', 79), ('10:19', '10:39', 20),
+                                           ('10:39', '11:08', 29), ('11:08', '11:38', 30)])
+        self.assertEqual([[c['hash'] for c in b['commits']] for b in blocks], [['a', 'b'], ['c'], ['d'], ['e']])
+
+    def test_short_first_interval_remains_and_can_receive_next_short_commit(self):
+        blocks = build_time_blocks(model([commit('09:10', 'a'), commit('09:20', 'b'), commit('10:00', 'c')]))
+        self.assertEqual(intervals(blocks), [('09:00', '09:20', 20), ('09:20', '10:00', 40)])
+        self.assertEqual([c['hash'] for c in blocks[0]['commits']], ['a', 'b'])
+
+    def test_net_work_under_20_merges_across_lunch_without_counting_lunch(self):
+        blocks = build_time_blocks(model([commit('11:50', 'a'), commit('13:39', 'b')], start='11:00'))
+        self.assertEqual(intervals(blocks), [('11:00', '12:00', 60), ('13:30', '13:39', 9)])
+        self.assertEqual([[c['hash'] for c in b['commits']] for b in blocks], [['a', 'b'], ['a', 'b']])
+        self.assertEqual(sum(b['duration_minutes'] for b in blocks), 69)
+
+    def test_exactly_20_net_work_minutes_across_lunch_stays_separate(self):
+        blocks = build_time_blocks(model([commit('11:50', 'a'), commit('13:40', 'b')], start='11:00'))
+        self.assertEqual(intervals(blocks), [('11:00', '11:50', 50), ('11:50', '12:00', 10), ('13:30', '13:40', 10)])
+        self.assertEqual([[c['hash'] for c in b['commits']] for b in blocks], [['a'], ['b'], ['b']])
+        self.assertEqual(sum(b['duration_minutes'] for b in blocks), 70)
+
+    def test_short_split_piece_of_long_commit_allocation_does_not_merge(self):
+        blocks = build_time_blocks(model([commit('11:40', 'a'), commit('14:10', 'b')]))
+        self.assertEqual(intervals(blocks), [('09:00', '11:40', 160), ('11:40', '12:00', 20), ('13:30', '14:10', 40)])
+        self.assertEqual([[c['hash'] for c in b['commits']] for b in blocks], [['a'], ['b'], ['b']])
+
+    def test_merge_across_calendar_keeps_scheduled_row_separate(self):
+        blocks = build_time_blocks(model([commit('10:00', 'a'), commit('11:19', 'b')],
+                                         [event('10:00', '11:00')]))
+        self.assertEqual(intervals(development(blocks)), [('09:00', '10:00', 60), ('11:00', '11:19', 19)])
+        self.assertEqual([[c['hash'] for c in b['commits']] for b in development(blocks)], [['a', 'b'], ['a', 'b']])
+        scheduled = [b for b in blocks if b['time_basis'] == 'scheduled']
+        self.assertEqual(intervals(scheduled), [('10:00', '11:00', 60)])
+        self.assertEqual(scheduled[0]['commits'], [])
+
+    def test_zero_work_commit_is_not_absorbed_into_previous_development(self):
+        review = []
+        blocks = build_time_blocks(model([commit('10:00', 'a'), commit('10:30', 'b'), commit('10:50', 'c')],
+                                         [event('10:00', '10:30')]), unassigned_activity=review)
+        self.assertEqual(intervals(development(blocks)), [('09:00', '10:00', 60), ('10:30', '10:50', 20)])
+        self.assertEqual([{c['hash'] for c in b['commits']} for b in development(blocks)], [{'a'}, {'b', 'c'}])
+        self.assertEqual(review, [])
+
+    def test_short_confirmed_end_tail_does_not_borrow_commit_or_merge(self):
+        blocks = build_time_blocks(model([commit('10:00', 'a'), commit('10:10', 'b')], end='10:20'))
+        self.assertEqual(intervals(blocks), [('09:00', '10:10', 70), ('10:10', '10:20', 10)])
+        self.assertEqual(blocks[-1]['commits'], [])
+        self.assertEqual(blocks[-1]['allocation']['basis'], 'confirmed_end')
+
+    def test_snapshots_freeze_unmerged_30_and_20_minute_rules(self):
+        activity = model([commit('10:00', 'a'), commit('10:29', 'b')])
+        with tempfile.TemporaryDirectory() as directory:
+            for version in (1, 2, 3):
+                review = []
+                blocks = build_time_blocks(activity, unassigned_activity=review, merge_short_commits=version >= 2,
+                                           short_commit_merge_minutes=30 if version == 2 else 20)
+                payload = prepare_activity_input(blocks, review)
+                path = Path(directory) / f'v{version}.json'
+                frozen = save_snapshot(path, activity, {'status': 'complete'}, blocks, review, payload)
+                self.assertEqual(frozen['schema_version'], 3)
+                if version != 3:
+                    frozen['schema_version'] = version
+                    frozen['fingerprint'] = fingerprint({k: v for k, v in frozen.items() if k != 'fingerprint'})
+                    path.write_text(json.dumps(frozen))
+                self.assertEqual(read_snapshot(path)['blocks'], blocks)
+                self.assertEqual(len(blocks), 1 if version == 2 else 2)
+                if version in (2, 3):
+                    frozen['schema_version'] = 3 if version == 2 else 2
+                    frozen['fingerprint'] = fingerprint({k: v for k, v in frozen.items() if k != 'fingerprint'})
+                    path.write_text(json.dumps(frozen))
+                    with self.assertRaises(SnapshotError): read_snapshot(path)
+
+    def test_identical_v1_snapshot_can_be_resaved_without_rewriting_history(self):
+        activity = model([commit('10:00')])
+        blocks = build_time_blocks(activity)
+        payload = prepare_activity_input(blocks, [])
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'snapshot.json'
+            collection = {'status': 'complete'}
+            frozen = save_snapshot(path, activity, collection, blocks, [], payload)
+            frozen['schema_version'] = 1
+            frozen['fingerprint'] = fingerprint({k: v for k, v in frozen.items() if k != 'fingerprint'})
+            path.write_text(json.dumps(frozen, indent=2))
+            before = path.read_bytes()
+            self.assertEqual(save_snapshot(path, activity, collection, blocks, [], payload), frozen)
+            self.assertEqual(path.read_bytes(), before)
 
     def test_confirmed_end_adds_tail_without_borrowing_last_commit(self):
         blocks = build_time_blocks(model([commit("10:00")], end="11:00"))
@@ -145,10 +252,11 @@ class TestPipelineCommitIntervals(unittest.TestCase):
             "github": {"users": ["tester"]}, "timezone": "Asia/Ho_Chi_Minh", "block_policy": {"strategy": "commit_intervals"}}))
         self.snapshot = self.root / "snapshot.json"
         self.output = self.root / "timesheets"
+        self.activities = [commit('10:00')]
 
     def invoke(self, *args):
         def collector(command, source, mode):
-            items = [{**commit("10:00"), "author": "Tester"}] if source == "git" else []
+            items = [{**activity, "author": "Tester"} for activity in self.activities] if source == "git" else []
             return {"source": source, "mode": mode, "status": "success", "items": items}
         argv = ["run_pipeline.py", "--date", DATE, "--config", str(self.profile), "--output-dir", str(self.output), *args]
         with patch.object(sys, "argv", argv), patch("run_pipeline.run_source_collector", side_effect=collector) as collect, \
@@ -185,6 +293,22 @@ class TestPipelineCommitIntervals(unittest.TestCase):
         rows = json.loads((self.output / f"{DATE}.json").read_text())
         self.assertEqual(rows[0]["entry"]["duration_minutes"], 90)
         self.assertEqual(rows[0]["estimation_policy"], {"strategy": "commit_intervals"})
+
+    def test_prepare_and_assemble_use_merged_commits_without_losing_sources(self):
+        self.activities = [commit('10:00', 'a'), commit('10:10', 'b'), commit('10:25', 'c')]
+        self.assertEqual(self.invoke('--phase', 'prepare', '--snapshot', str(self.snapshot), '--work-start', '09:00'), (0, 3))
+        frozen = read_snapshot(self.snapshot)
+        self.assertEqual(frozen['schema_version'], 3)
+        self.assertEqual(intervals(frozen['blocks']), [('09:00', '10:25', 85)])
+        self.assertEqual(len(frozen['ai_input']['summary_request']['jobs']), 1)
+        self.assertEqual(self.invoke('--phase', 'assemble', '--snapshot', str(self.snapshot)), (0, 0))
+        path = self.output / f'{DATE}.json'
+        rows = json.loads(path.read_text())
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(len(rows[0]['sources']['commits']), 3)
+        before = path.read_bytes()
+        self.assertEqual(self.invoke('--phase', 'assemble', '--snapshot', str(self.snapshot)), (0, 0))
+        self.assertEqual(path.read_bytes(), before)
 
 
 if __name__ == "__main__":
