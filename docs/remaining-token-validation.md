@@ -30,6 +30,10 @@ non-usage control records are ignored. Old records lacking IDs only deduplicate
 exact JSON snapshots; broader identity cannot be inferred. Missing selected IDs or
 no attributed usage blocks recording. Explicit zero in all four fields is valid.
 
+The 09/10 follow-up additionally checks conflicting older snapshots in every arrival
+order: seeing a newer complete snapshot first cannot hide a same-timestamp conflict
+among older records. Identical older duplicates remain valid and use the latest total.
+
 Input/output/cache remain separate; cache combines read and creation. Total is
 input + output + cache. This is a token-volume metric, not price-equivalent billing
 or a tokenizer count for the payload. The exact payload byte size is reported
@@ -49,6 +53,9 @@ via the standalone collector; it can include usage unavailable during assembly.
 
 CSV headers/rows/counts/duplicate identities are checked before replacement;
 corrupt files remain for review. CSV updates use locks and atomic replacement.
+Reporting uses these same CSV checks: duplicate rows or an attributed session/run
+identity repeated on two execution dates block both daily totals and updates, rather
+than silently doubling costs or retaining a corrupt history.
 When usage accompanies assembly, CSV participates in the recoverable output bundle
 and rollback, with all relevant directory locks acquired in canonical sorted order.
 No-record calls neither initialize nor rewrite a CSV.

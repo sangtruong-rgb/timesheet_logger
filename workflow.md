@@ -42,8 +42,8 @@ and override ownership; exact override suppresses an automatic interval, conflic
 intervals block. Legacy rows without provenance require classification, not deletion.
 
 D02: `commit_intervals` requires a per-day confirmed `--work-start`, with optional
-`--work-end`. Allocate start → first commit, then commit → commit; subtract lunch
-12:00–13:30 and scheduled Calendar coverage. No mid-session break input, idle split,
+`--work-end`. Allocate start → first commit, then commit → commit; subtract configured
+breaks (default 12:00–13:30) and scheduled Calendar coverage. No idle split,
 padding to a minimum or maximum duration. Commit allocations with 1–19 net work
 minutes merge into the previous allocation before lunch/Calendar splitting; preserve
 all evidence and original allocation bounds. The first allocation, zero-work
@@ -56,12 +56,18 @@ qualified commit SHA attaches to its closing allocation, preserving the event ti
 Development remains estimated;
 continuous work between boundaries is an explicit allocation assumption. Scheduled
 meetings remain whole during lunch/outside hours, attendance unconfirmed.
-Snapshot v4 freezes allocation group IDs before piece-specific evidence assignment
+Snapshot v5 freezes work_schedule; v4 freezes allocation group IDs before piece-specific evidence assignment
 and permits proven merge-commit associations. V3 freezes the previous under-20-minute
 behavior; v2 retains under-30-minute merging
 and v1 retains unmerged intervals.
-Older activity-cluster/legacy snapshots retain their original behavior. Recurring
-schedule configuration and BREAK/OT classification remain unsupported.
+Older activity-cluster/legacy snapshots retain their original behavior. Work schedule
+configuration now supports regular hours, multiple breaks, weekdays, explicit holiday
+dates and overtime windows. The default keeps 09:00–12:00 / 13:30–17:30 and all days;
+no locale/holiday calendar is guessed. Evidence is required for inferred development
+windows. Explicit daily confirmation permits work on nonworking days/outside regular
+hours, still excluding configured breaks and Calendar. Breaks are excluded minutes,
+not worked rows; automatic BREAK/OT classification is unsupported. See
+[the policy and validation](docs/work-schedule.md).
 
 ## Token Budget
 

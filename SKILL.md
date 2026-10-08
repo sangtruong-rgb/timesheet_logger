@@ -18,6 +18,16 @@ For other blockers, complete independent checks and ask only for the information
 or user action needed to continue. Never ask for credential contents. This shorthand
 does not authorize publishing. Explicit user instructions override these defaults.
 
+Range invocation: `$personal-timesheet 8:00-12:00, 1h30-4:00` requests the same
+preview within 08:00–12:00 and 13:30–16:00. Pass the supplied comma-separated
+text as one quoted `--work-windows` argument instead of start/end flags. Python
+resolves shorthand clocks in chronological order; padded HH:MM remains 24-hour
+and explicit AM/PM is accepted. Show canonical windows. They replace profile
+hours/breaks only for this date, exclude gaps, clip Calendar proposals, and include
+the confirmed closing tail. Preserve excluded evidence for review and freeze the
+windows in the snapshot. Invalid inputs fail before collection; do not guess a
+replacement. No extra start/end confirmation or publishing is authorized.
+
 Resolve the bundle through `${CLAUDE_SKILL_DIR}`, never the invoking project's
 working directory. Paths below are placeholders, not shell angle-bracket syntax.
 Use the configured Python environment with optional Calendar libraries. Never read,
@@ -33,7 +43,8 @@ print or commit credentials/token contents. Do not edit Calendar or infer attend
    already supplied for that date; never infer 09:00 or reuse another day's hours.
    Pass `--work-end HH:MM` only if the user confirms a finishing time; otherwise
    stop at the last commit and report that remaining time is not included. Do not
-   ask about mid-session breaks. Prepare with quoted absolute paths:
+   ask about mid-session breaks. For range invocation, substitute
+   `--work-windows "$TS_WORK_WINDOWS"` for the start/end flags. Prepare with quoted absolute paths:
 
    ```bash
    python3 "${CLAUDE_SKILL_DIR}/scripts/run_pipeline.py" --phase prepare \
@@ -93,14 +104,17 @@ print or commit credentials/token contents. Do not edit Calendar or infer attend
    or AI summaries, and any unassigned/attendance review. Keep full-day future
    meetings as proposals: **Theo lịch, chưa xác nhận tham dự**. Scheduled/estimated
    minutes are not measured work. Commit intervals allocate time from confirmed
-   start to each closing commit, subtract lunch 12:00–13:30 and Calendar coverage,
+   start to each closing commit, subtract frozen configured breaks (default lunch
+   12:00–13:30) and Calendar coverage,
    and have no 30-minute minimum or 90-minute cap. Split rows may share closing
    commit evidence; this is completion context, not timestamp containment. PRs
    never add duration. Confirmed hours are frozen in the snapshot; changes require
    a new prepare run. An accepted commit-interval policy and confirmed daily hours
    do not require another per-block boundary confirmation. Activity-cluster boundaries are inferred and must
-   be confirmed or overridden before publishing. BREAK/OT and configurable schedule
-   policy remain deferred. Never silently erase manual edits or migrate ambiguous
+   be confirmed or overridden before publishing. Work schedule settings are frozen
+   during prepare; explicit daily hours permit work outside regular/day limits.
+   Breaks exclude development time; automatic BREAK/OT labels are unsupported.
+   Never silently erase manual edits or migrate ambiguous
    old rows.
 
 No automatic ticket clustering, judgment cache, daily scheduling or attendance

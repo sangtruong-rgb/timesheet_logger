@@ -28,6 +28,14 @@
   "block_policy": {
     "strategy": "commit_intervals"
   },
+  "work_schedule": {
+    "start": "09:00",
+    "end": "17:30",
+    "breaks": [{"start": "12:00", "end": "13:30"}],
+    "weekdays": [0, 1, 2, 3, 4, 5, 6],
+    "holidays": [],
+    "overtime_windows": []
+  },
   "token_tracking": {
     "claude_dir": "~/.claude",
     "csv_path": "../data/token-usage.csv"

@@ -352,7 +352,7 @@ class TestPipelineCommitIntervals(unittest.TestCase):
         self.activities = [commit('10:00', 'a'), commit('10:10', 'b'), commit('10:25', 'c')]
         self.assertEqual(self.invoke('--phase', 'prepare', '--snapshot', str(self.snapshot), '--work-start', '09:00'), (0, 3))
         frozen = read_snapshot(self.snapshot)
-        self.assertEqual(frozen['schema_version'], 4)
+        self.assertEqual(frozen['schema_version'], 5)
         self.assertEqual(intervals(frozen['blocks']), [('09:00', '10:25', 85)])
         self.assertEqual(len(frozen['ai_input']['summary_request']['jobs']), 1)
         self.assertEqual(self.invoke('--phase', 'assemble', '--snapshot', str(self.snapshot)), (0, 0))

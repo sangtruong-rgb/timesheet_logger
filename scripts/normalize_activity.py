@@ -266,8 +266,13 @@ def _main():
 
     try:
         zone_name, tz = timezone_settings(args.config, args.timezone)
+        from work_schedule import schedule_settings, schedule_bounds
+        schedule = schedule_settings(args.config)
         target_date_str = args.date or datetime.datetime.now(tz).date().isoformat()
-        datetime.date.fromisoformat(target_date_str)
+        date = datetime.date.fromisoformat(target_date_str)
+        if date.isoformat() != target_date_str:
+            raise ValueError('Target date must be canonical YYYY-MM-DD')
+        schedule_bounds({'work_schedule': schedule}, date, tz)
     except (ValueError, OSError) as exc:
         parser.error(str(exc))
 
@@ -298,6 +303,7 @@ def _main():
 
     try:
         normalized = normalize_all(target_date_str, commits, prs, calendar, zone_name)
+        normalized['work_schedule'] = schedule
     except ActivityNormalizationError as exc:
         draft = {"date": target_date_str, "activity_format": "raw", "normalization": {"status": "blocked", "issues": exc.issues},
                  "activity": {"commits": commits, "pull_requests": prs, "calendar": calendar}}

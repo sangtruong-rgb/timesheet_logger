@@ -213,6 +213,9 @@ def build_entries(
             values = b.get(field, [])
             if not isinstance(values, list) or any(not isinstance(v, str if field == "calendar_titles" else dict) for v in values):
                 raise AIJudgmentError("Candidate source fields must contain correctly typed arrays")
+        if 'work_schedule' in b:
+            from work_schedule import validate_schedule
+            validate_schedule(b['work_schedule'])
 
         # Resolve topic summary
         topic_summary = ""
@@ -245,6 +248,7 @@ def build_entries(
             **({"estimation_reason": b["estimation_reason"]} if "estimation_reason" in b else {}),
             **({"estimation_policy": b["estimation_policy"]} if "estimation_policy" in b else {}),
             **({"work_confirmation": b["work_confirmation"]} if "work_confirmation" in b else {}),
+            **({"work_schedule": b["work_schedule"]} if "work_schedule" in b else {}),
             **({"allocation": b["allocation"]} if "allocation" in b else {}),
             **({"calendar_overlap": True} if b.get("calendar_overlap") else {}),
             **({"review": b["review"]} if b.get("review") else {}),

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Timesheet by Work Windows"
+  short_description: "Preview work within confirmed daily time windows"
+  default_prompt: "Use $personal-timesheet-windows 8:00-12:00, 1h30-4:00 to preview today’s work."

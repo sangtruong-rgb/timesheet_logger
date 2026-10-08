@@ -15,9 +15,9 @@ Rules:
      All-day events belong to audit context and never form timed work blocks.
    - Development gaps require a timestamped commit/PR inside their interval.
      These durations are estimated, not proof of continuous work.
-   - Calendar development gaps are restricted to 09:00–12:00 / 13:30–17:30
-     before checking activity. Scheduled Calendar events outside these windows
-     are retained.
+   - Calendar development gaps are restricted to the frozen work schedule
+     (default 09:00–12:00 / 13:30–17:30) before checking activity.
+     Scheduled Calendar events outside these windows are retained.
 2. With an explicit activity-cluster policy:
    - Group timestamped development actions by idle gap and maximum duration.
    - Round inferred boundaries to 15 minutes inside work/lunch/Calendar bounds.
@@ -144,6 +144,8 @@ def build_time_blocks(normalized_data: Dict[str, Any], *, unassigned_activity=No
     target_date_str = target_date.isoformat()
     try:
         block_policy = policy_from_model(normalized_data)
+        from work_schedule import schedule_bounds
+        schedule, work_windows, _ = schedule_bounds(normalized_data, target_date, tz)
     except ValueError as exc:
         raise BlockIdentityError(str(exc)) from exc
     clustered = block_policy["strategy"] == CLUSTER_STRATEGY
@@ -193,11 +195,8 @@ def build_time_blocks(normalized_data: Dict[str, Any], *, unassigned_activity=No
 
     # CASE A: Calendar events exist
     if calendar:
-        # Standard bounds
-        day_start = datetime.datetime.combine(target_date, datetime.time(9, 0), tzinfo=tz)
-        lunch_start = datetime.datetime.combine(target_date, datetime.time(12, 0), tzinfo=tz)
-        lunch_end = datetime.datetime.combine(target_date, datetime.time(13, 30), tzinfo=tz)
-        day_end = datetime.datetime.combine(target_date, datetime.time(17, 30), tzinfo=tz)
+        day_start = work_windows[0][0] if work_windows else daily_start
+        day_end = work_windows[-1][1] if work_windows else daily_end
 
         # Partition at event boundaries; each minute has one set of active sources.
         event_bounds = []
@@ -232,7 +231,7 @@ def build_time_blocks(normalized_data: Dict[str, Any], *, unassigned_activity=No
         def append_development_gap(start, end):
             # Intersect gaps with work windows before checking duration/activity.
             # Cluster mode then narrows each gap around timestamped activity.
-            for window_start, window_end in ((day_start, lunch_start), (lunch_end, day_end)):
+            for window_start, window_end in work_windows:
                 gap_start, gap_end = max(start, window_start), min(end, window_end)
                 minimum = block_policy.get("minimum_block_minutes", 30) if clustered else 30
                 if (gap_end - gap_start).total_seconds() < minimum * 60:
@@ -297,27 +296,24 @@ def build_time_blocks(normalized_data: Dict[str, Any], *, unassigned_activity=No
             # Empty day
             return []
 
-        if clustered:
-            work_windows = (
-                (datetime.datetime.combine(target_date, datetime.time(9, 0), tzinfo=tz),
-                 datetime.datetime.combine(target_date, datetime.time(12, 0), tzinfo=tz)),
-                (datetime.datetime.combine(target_date, datetime.time(13, 30), tzinfo=tz),
-                 datetime.datetime.combine(target_date, datetime.time(17, 30), tzinfo=tz)),
-            )
+        if clustered or 'work_schedule' in normalized_data:
             for window_start, window_end in work_windows:
-                for cluster_start, cluster_end in activity_cluster_bounds(
-                        window_start, window_end, development_activity, block_policy):
+                if clustered and calculate_minutes(window_start, window_end) < block_policy['minimum_block_minutes']:
+                    continue
+                bounds = (activity_cluster_bounds(window_start, window_end, development_activity, block_policy)
+                          if clustered else [(window_start, window_end)])
+                for cluster_start, cluster_end in bounds:
                     blocks.append({
                         "date": target_date_str,
                         "start_time": format_hhmm(cluster_start),
-                        "end_time": format_hhmm(cluster_end),
+                        "end_time": "24:00" if cluster_end == daily_end else format_hhmm(cluster_end),
                         "duration_minutes": calculate_minutes(cluster_start, cluster_end),
                         "calendar_titles": [],
                         "commits": [],
                         "prs": [],
-                        "estimation_reason": "activity_cluster",
-                        "review": {"status": "required", "reasons": ["inferred_activity_boundaries"]},
-                        "estimation_policy": dict(block_policy),
+                        "estimation_reason": "activity_cluster" if clustered else "activity_workday_window",
+                        **({"review": {"status": "required", "reasons": ["inferred_activity_boundaries"]},
+                            "estimation_policy": dict(block_policy)} if clustered else {}),
                     })
 
         # Analyze commit / PR timestamps
@@ -336,7 +332,7 @@ def build_time_blocks(normalized_data: Dict[str, Any], *, unassigned_activity=No
         has_morning = any(t < noon for t in all_times)
         has_afternoon = any(t >= noon for t in all_times) if all_times else False
 
-        if clustered:
+        if clustered or 'work_schedule' in normalized_data:
             pass
         elif has_morning and has_afternoon:
             s1 = datetime.datetime.combine(target_date, datetime.time(9, 0), tzinfo=tz)
@@ -392,7 +388,8 @@ def build_time_blocks(normalized_data: Dict[str, Any], *, unassigned_activity=No
             block["time_basis"] = "estimated"
             block.setdefault("estimation_reason", "activity_workday_window")
             start = datetime.datetime.combine(target_date, datetime.time.fromisoformat(block["start_time"]), tzinfo=tz)
-            end = datetime.datetime.combine(target_date, datetime.time.fromisoformat(block["end_time"]), tzinfo=tz)
+            from work_schedule import local_clock
+            end = local_clock(target_date, block["end_time"], tz)
             block_bounds.append((start, end))
 
         # A timestamp outside the candidate window must not create estimated hours.
@@ -404,6 +401,9 @@ def build_time_blocks(normalized_data: Dict[str, Any], *, unassigned_activity=No
     for block, (start, end) in zip(blocks, block_bounds):
         block["interval"] = {"start": start.isoformat(), "end": end.isoformat()}
         block["timezone"] = normalized_data.get("timezone", getattr(tz, "key", str(tz)))
+        if 'work_schedule' in normalized_data:
+            from copy import deepcopy
+            block['work_schedule'] = deepcopy(schedule)
 
     def retain_unassigned(source, activity, timestamp):
         if unassigned_activity is None:

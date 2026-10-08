@@ -52,6 +52,18 @@ For a short request with your confirmed start time:
 ./bin/personal-timesheet-codex 09:00
 ```
 
+Multiple confirmed windows for today (preview only):
+
+```text
+$personal-timesheet 8:00-12:00, 1h30-4:00
+$personal-timesheet-windows 8:00-12:00, 1h30-4:00
+```
+
+From the terminal, run `./bin/personal-timesheet-codex "8:00-12:00, 1h30-4:00"`.
+Both skill names use the same pipeline: 08:00–12:00 and 13:30–16:00, excluding
+the gap. Add a date to apply the windows to that date. These windows replace
+profile hours/breaks only for this run. See [daily work windows](docs/work-schedule.md#confirmed-daily-windows).
+
 Or type `$personal-timesheet 09:00` inside an existing Codex CLI session opened
 in this repository. This requests today's live-source preview with measured Codex
 summary usage when eligible. The skill asks for a missing start or other blocking
@@ -149,7 +161,7 @@ default. Prepare freezes the daily confirmation in the snapshot; assemble reject
 clock overrides. Changed hours require a new snapshot.
 
 - Allocate confirmed start → first commit, then previous commit → next commit.
-- Subtract lunch **12:00–13:30** and the union of scheduled Calendar intervals.
+- Subtract configured breaks (default **12:00–13:30**) and the union of scheduled Calendar intervals.
   A crossing interval becomes separate rows. Calendar rows remain scheduled,
   attendance-unconfirmed proposals, including lunch/future events.
 - If a commit allocation has **1–19 work minutes after these exclusions**, merge
@@ -159,7 +171,7 @@ clock overrides. Changed hours require a new snapshot.
   zero-work allocation stays separate for Calendar/review assignment. A confirmed-end
   tail is not a commit allocation and does not merge. Apply this rule before splitting
   at lunch/Calendar: a short piece of a longer allocation does not trigger a merge.
-- No mid-session breaks, idle-gap splitting, padding to 20 minutes or 90-minute cap.
+- Additional breaks can be configured; no idle-gap splitting, padding to 20 minutes or 90-minute cap.
   The confirmed start can be outside the old 09:00–17:30 work windows; no OT label
   is inferred. This strategy assumes continuous work between commit boundaries.
 - Floor commit boundaries to the minute; retain original source timestamps.
@@ -183,10 +195,40 @@ Example: start 09:00, commits 10:10 / 11:40 / 14:10 / 16:00, no Calendar:
 Confirmed hours and allocation metadata survive into the final JSON. Development
 remains `estimated`: commit boundaries allocate time, not measure task duration.
 For example, commits at 10:00 / 10:10 / 10:25 become one 09:00–10:25 row (85m),
-containing all three commits. New snapshots use schema v4 to freeze stable allocation
-groups and merge-commit associations. V3 retains the previous under-20-minute rule;
+containing all three commits. New pipeline snapshots use schema v5 to freeze the work
+schedule as well as stable allocation groups and merge-commit associations. V4 retains
+the default schedule and its previous allocation behavior. V3 retains the previous under-20-minute rule;
 v2 retains under-30-minute merging and v1 retains unmerged intervals. Changed allocations require
 a new prepare snapshot.
+
+### Configurable work schedule
+
+`work_schedule` in the profile controls regular hours, breaks and additional overtime
+windows. Its default is **09:00–12:00 / 13:30–17:30**. See
+[the schedule policy and examples](docs/work-schedule.md). For example:
+
+```json
+{
+  "work_schedule": {
+    "start": "08:30",
+    "end": "17:00",
+    "breaks": [{"start": "12:00", "end": "13:00"}],
+    "weekdays": [0, 1, 2, 3, 4],
+    "holidays": ["2026-12-25"],
+    "overtime_windows": [{"start": "18:00", "end": "20:00"}]
+  }
+}
+```
+
+Weekdays use 0 = Monday through 6 = Sunday; the default keeps all seven days to
+preserve existing behavior. Holidays are explicit dates, not inferred from a locale.
+Without confirmed daily hours, development requires evidence inside an enabled
+window and cannot fill breaks, nonworking days or the gap before overtime. A daily
+`--work-start` explicitly permits work outside regular/day limits; configured breaks
+and Calendar still subtract from commit intervals. Calendar proposals are retained
+on all days. Breaks are exclusions, not worked rows; no automatic BREAK/OT label is
+assigned. Prepare/normalize freeze the schedule; assemble never reloads it from a
+changed profile. Invalid or overlapping intervals block before source collection.
 
 ### Previous policies and source scope
 
@@ -195,12 +237,13 @@ a commit or PR action attaches only to its [start,end) interval. Unassigned evid
 is retained separately and adds no duration. With `block_policy.strategy` set to
 `activity_clusters`, development timestamps are grouped until the configured idle
 gap or maximum block length is reached. Boundaries are rounded to 15 minutes, kept
-within 09:00–12:00 / 13:30–17:30 and marked for human review. A dense batch of PR
+within configured work windows and marked for human review. A dense batch of PR
 merges therefore supports one short administrative block rather than an entire
 half-day or one invented duration per PR. Profiles without an explicit policy retain
-the legacy half-day behavior so frozen snapshots remain reproducible. Timestamps do
-not prove continuous work. Recurring schedules and BREAK/OT
-labeling remain unsupported. Scheduled meetings during lunch or outside work hours
+the legacy strategy, bounded by the frozen schedule in new pipeline runs. Old models
+without a schedule retain their historical half-day behavior, including the former
+12:30 morning-only end. Timestamps do not prove continuous work. Automatic BREAK/OT
+labeling remains unsupported. Scheduled meetings during lunch or outside work hours
 remain proposals. Totals are Total Proposed Time when scheduled/estimated rows exist.
 
 PR scope (D04): selected GitHub repositories and confirmed accounts, with actual

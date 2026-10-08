@@ -123,6 +123,23 @@ class TestUsageCompleteness(unittest.TestCase):
         self.write([self.line(),self.line({**COUNTS,'output_tokens':30})])
         with self.assertRaisesRegex(ValueError,'same timestamp'): self.collect()
 
+    def test_older_timestamp_conflict_is_rejected_in_every_arrival_order(self):
+        from itertools import permutations
+        lines = [self.line(), self.line({**COUNTS, 'output_tokens': 99}),
+                 self.line({**COUNTS, 'output_tokens': 30}, minute='16')]
+        for order in permutations(lines):
+            with self.subTest(order=[v['timestamp'] for v in order]):
+                self.write(order)
+                with self.assertRaisesRegex(ValueError, 'same timestamp'):
+                    self.collect()
+
+    def test_older_exact_duplicates_do_not_block_latest_complete_snapshot(self):
+        from itertools import permutations
+        for order in permutations([self.line(), self.line(),
+                                   self.line({**COUNTS, 'output_tokens': 30}, minute='16')]):
+            self.write(order)
+            self.assertEqual(self.collect()['total_tokens'], 135)
+
     def test_raw_streaming_records_are_not_final_usage_snapshots(self):
         for event_type in ('message_start','message_delta','stream_event'):
             obj=self.line(); obj['type']=event_type

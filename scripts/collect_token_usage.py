@@ -86,7 +86,7 @@ def usage_identity(obj):
 
 def usage_records(path, start, end, message_ids=None):
     """Latest complete snapshot per message; never silently drop in-scope bad usage."""
-    selected, skipped = {}, 0
+    selected, snapshots, skipped = {}, {}, 0
     try:
         with Path(path).open(encoding='utf-8') as stream:
             for line_number, line in enumerate(stream, 1):
@@ -109,8 +109,10 @@ def usage_records(path, start, end, message_ids=None):
                     counts = parse_transcript_line_usage(obj)
                 except (ValueError, TypeError, KeyError, OverflowError) as exc:
                     raise ValueError(f'Usage line {line_number}: {exc}') from exc
-                if key in selected and timestamp == selected[key][0] and counts != selected[key][1]:
+                snapshot_key = (key, timestamp)
+                if snapshot_key in snapshots and counts != snapshots[snapshot_key]:
                     raise ValueError('Conflicting usage snapshots at the same timestamp; token total is not established')
+                snapshots[snapshot_key] = counts
                 if key not in selected or timestamp > selected[key][0]: selected[key] = (timestamp, counts)
     except (OSError, UnicodeError) as exc:
         raise ValueError('Requested transcript is unreadable; token records were preserved') from exc
@@ -196,17 +198,30 @@ def validated_record(record):
     return dict(zip(FIELDS, [date,key,*counts,record['notes']]))
 
 
+def read_csv_records(csv_path):
+    """Apply the same identity checks to reporting and writes."""
+    existing, attributed_dates = {}, {}
+    with Path(csv_path).open(encoding='utf-8', newline='') as stream:
+        reader = csv.DictReader(stream)
+        if reader.fieldnames != FIELDS:
+            raise ValueError('Token CSV header is corrupt or unsupported; preserved for review')
+        for row in reader:
+            valid = validated_record(row)
+            date, identity = valid['date'], valid['session_id']
+            key = (date, identity)
+            if key in existing:
+                raise ValueError('Duplicate token CSV run identities; preserved for review')
+            if '/' in identity:
+                if identity in attributed_dates and attributed_dates[identity] != date:
+                    raise ValueError('Attributed run identity cannot move between execution dates')
+                attributed_dates[identity] = date
+            existing[key] = valid
+    return existing
+
+
 def csv_contents(csv_path, new_records):
-    existing={}
-    path=Path(csv_path)
-    if path.exists():
-        with path.open(encoding='utf-8',newline='') as stream:
-            reader=csv.DictReader(stream)
-            if reader.fieldnames != FIELDS: raise ValueError('Token CSV header is corrupt or unsupported; preserved for review')
-            for row in reader:
-                valid=validated_record(row); key=(valid['date'],valid['session_id'])
-                if key in existing: raise ValueError('Duplicate token CSV run identities; preserved for review')
-                existing[key]=valid
+    path = Path(csv_path)
+    existing = read_csv_records(path) if path.exists() else {}
     for record in new_records:
         valid=validated_record(record)
         if '/' in valid['session_id'] and any(key[1] == valid['session_id'] and key[0] != valid['date'] for key in existing):
@@ -229,14 +244,14 @@ def update_csv(csv_path, new_records):
 def daily_totals(csv_path, date):
     """Separate measured transcripts from self-reported totals; exclude legacy/synthetic rows."""
     categories = {name: {key: 0 for key in FIELDS[2:6]} for name in ("transcript", "codex_exec", "self_reported")}
-    with Path(csv_path).open(encoding="utf-8", newline="") as stream:
-        for raw in csv.DictReader(stream):
-            row = validated_record(raw)
-            if row["date"] != date: continue
-            try: metadata = json.loads(row["notes"])
-            except ValueError: continue
-            if not isinstance(metadata, dict) or metadata.get("source") not in categories: continue
-            for key in FIELDS[2:6]: categories[metadata["source"]][key] += row[key]
+    if not isinstance(date, str) or datetime.date.fromisoformat(date).isoformat() != date:
+        raise ValueError('Invalid token execution date')
+    for row in read_csv_records(csv_path).values():
+        if row["date"] != date: continue
+        try: metadata = json.loads(row["notes"])
+        except ValueError: continue
+        if not isinstance(metadata, dict) or metadata.get("source") not in categories: continue
+        for key in FIELDS[2:6]: categories[metadata["source"]][key] += row[key]
     return {"execution_date": date, "by_provenance": categories,
             "excludes": "legacy/unattributed/synthetic rows; selected-message scope remains in run notes"}
 

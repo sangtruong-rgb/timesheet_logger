@@ -17,15 +17,21 @@ from block_identity import BlockIdentityError
 from block_settings import COMMIT_STRATEGY, LEGACY_STRATEGY, SHORT_COMMIT_MERGE_MINUTES
 
 
-def work_confirmation(date, start, end=None):
+def work_confirmation(date, start, end=None, *, windows=None):
     """Validate explicit per-day local clock input; never default a start time."""
+    if windows is not None:
+        from work_windows import validate_work_windows
+        windows = validate_work_windows(windows)
+        if start != windows[0]['start'] or end != windows[-1]['end']:
+            raise BlockIdentityError('Confirmed work window boundaries conflict with daily start/end')
     clock = r"(?:[01][0-9]|2[0-3]):[0-5][0-9]"
     if not isinstance(start, str) or not re.fullmatch(clock, start):
         raise BlockIdentityError("commit_intervals requires a confirmed --work-start HH:MM for this date")
     if end is not None and (not isinstance(end, str) or
                             not (re.fullmatch(clock, end) or end == "24:00") or end <= start):
         raise BlockIdentityError("--work-end must be HH:MM (or 24:00), after --work-start on the same day")
-    return {"date": date, "start": start, **({"end": end} if end is not None else {})}
+    return {"date": date, "start": start, **({"end": end} if end is not None else {}),
+            **({'windows': windows} if windows is not None else {})}
 
 
 def subtract_intervals(start, end, excluded):
@@ -58,14 +64,18 @@ def build_commit_intervals(model, date, tz, unassigned, *, merge_short_commits=T
     confirmation = model.get("work_confirmation")
     if not isinstance(confirmation, dict) or confirmation.get("date") != date.isoformat():
         raise BlockIdentityError("commit_intervals requires work_confirmation for the selected date")
-    if set(confirmation) - {"date", "start", "end"}:
+    if set(confirmation) - {"date", "start", "end", "windows"}:
         raise BlockIdentityError("Unsupported work_confirmation fields")
-    confirmation = work_confirmation(date.isoformat(), confirmation.get("start"), confirmation.get("end"))
+    if 'windows' in confirmation and confirmation['windows'] is None:
+        raise BlockIdentityError('Confirmed work windows cannot be null')
+    confirmation = work_confirmation(date.isoformat(), confirmation.get("start"), confirmation.get("end"),
+                                     windows=confirmation.get('windows'))
     midnight = datetime.datetime.combine(date, datetime.time(), tzinfo=tz)
     day_end = datetime.datetime.combine(date + datetime.timedelta(days=1), datetime.time(), tzinfo=tz)
 
     def local_clock(value):
-        return day_end if value == "24:00" else datetime.datetime.combine(date, datetime.time.fromisoformat(value), tzinfo=tz)
+        from work_schedule import local_clock as schedule_clock
+        return schedule_clock(date, value, tz)
 
     start = local_clock(confirmation["start"])
     finish = local_clock(confirmation["end"]) if "end" in confirmation else None
@@ -73,7 +83,34 @@ def build_commit_intervals(model, date, tz, unassigned, *, merge_short_commits=T
     # sources so the legacy builder cannot infer any development gaps.
     blocks = build_time_blocks({**model, "commits": [], "pull_requests": [],
                                "unassigned_activity": [], "block_policy": {"strategy": LEGACY_STRATEGY}})
-    excluded = [(local_clock("12:00"), local_clock("13:30"))]
+    from work_schedule import schedule_bounds
+    schedule, _, excluded = schedule_bounds(model, date, tz)
+    windows = None
+    if 'windows' in confirmation:
+        windows = [(local_clock(item['start']), local_clock(item['end'])) for item in confirmation['windows']]
+        # Explicit windows replace profile breaks for this date. Their complement
+        # is excluded, so custom lunch and all other gaps remain uncounted.
+        excluded = [(right, left) for (_, right), (left, _) in zip(windows, windows[1:])]
+        clipped = []
+        for block in blocks:
+            left, right = (parse_dt(block['interval'][field]) for field in ('start', 'end'))
+            for window_start, window_end in windows:
+                piece_start, piece_end = max(left, window_start), min(right, window_end)
+                if piece_start < piece_end:
+                    clipped.append({**block, 'start_time': piece_start.strftime('%H:%M'),
+                                    'end_time': '24:00' if piece_end == day_end else piece_end.strftime('%H:%M'),
+                                    'duration_minutes': calculate_minutes(piece_start, piece_end),
+                                    'interval': {'start': piece_start.isoformat(), 'end': piece_end.isoformat()},
+                                    'work_confirmation': dict(confirmation)})
+        blocks = clipped
+        # Keep excluded scheduled evidence for review; never create time for it.
+        if unassigned is not None:
+            for event in model.get('calendar', []):
+                if event.get('all_day') or len(event.get('start', '')) == 10:
+                    continue
+                left, right = parse_dt(event.get('start')), parse_dt(event.get('end'))
+                if left is not None and right is not None and any(subtract_intervals(left, right, windows)):
+                    unassigned.append({'source': 'google_calendar', 'reason': 'outside_blocks', 'activity': dict(event)})
     excluded += [(parse_dt(b["interval"]["start"]), parse_dt(b["interval"]["end"])) for b in blocks]
 
     def timestamp(activity):
@@ -86,7 +123,8 @@ def build_commit_intervals(model, date, tz, unassigned, *, merge_short_commits=T
     commits = model.get("commits", [])
     for index, commit in enumerate(commits):
         instant = timestamp(commit)
-        if instant is not None and start < instant < day_end and (finish is None or instant <= finish):
+        if (instant is not None and start < instant < day_end and (finish is None or instant <= finish)
+                and (windows is None or any(left < instant <= right for left, right in windows))):
             minute = instant.replace(second=0, microsecond=0)
             if minute > start:
                 groups.setdefault(minute, []).append((index, commit))
@@ -211,4 +249,7 @@ def build_commit_intervals(model, date, tz, unassigned, *, merge_short_commits=T
                 retain("github", action)
     for block in blocks:
         block["prs"] = deduplicate_prs(block["prs"])
+        if 'work_schedule' in model:
+            from copy import deepcopy
+            block['work_schedule'] = deepcopy(schedule)
     return blocks
