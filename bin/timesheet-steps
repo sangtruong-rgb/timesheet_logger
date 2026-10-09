@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ ! -x "$root/.venv/bin/python" ]]; then
+  echo "Missing .venv. Follow README.md runtime setup first." >&2
+  exit 2
+fi
+exec "$root/.venv/bin/python" "$root/scripts/workflow_steps.py" "$@"

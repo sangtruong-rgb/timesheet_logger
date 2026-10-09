@@ -63,9 +63,9 @@ Generated-calendar overlaps, inferred work durations, all-day/cross-midnight
 normalization, sparse AI matching, source scope, and run-scoped token tracking
 remain separate findings. The live 240-minute fallback is an estimate, not proof
 of four hours worked. File writes are not a transaction across all output files;
-concurrent-write/interruption hardening remains F29. The legacy `upsert_entries`
-utility remains available for old callers/tests but is no longer used by daily
-persistence.
+concurrent-write/interruption hardening remains F29 in this historical audit.
+The unused legacy partial-upsert helper was subsequently removed; daily
+persistence uses complete-snapshot reconciliation.
 
 F02 / issue #3 stays open as ready for review until its change is reviewed and
 merged. Its branch is based on `fix/github-personal-activity` / PR #50, which

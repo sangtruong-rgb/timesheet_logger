@@ -4,11 +4,14 @@ import datetime
 
 from activity_settings import resolve_timezone
 from block_identity import BlockIdentityError
-from work_schedule import local_clock
+from work_schedule import local_clock, validate_schedule
 from work_windows import validate_work_windows
 
-DEFAULT_OT_POLICY = {'default_minutes': 60, 'end_basis': 'commit_minute_floor',
-                     'approval': 'standing_user_rule'}
+LEGACY_OT_POLICY = {'default_minutes': 60, 'end_basis': 'commit_minute_floor',
+                    'approval': 'standing_user_rule'}
+DEFAULT_OT_POLICY = {**LEGACY_OT_POLICY, 'exclude_breaks': 'frozen_work_schedule'}
+WORK_DAY_OT_POLICY = {**LEGACY_OT_POLICY, 'exclude_breaks': 'work_day_lunch'}
+SUPPORTED_OT_POLICIES = (DEFAULT_OT_POLICY, WORK_DAY_OT_POLICY, LEGACY_OT_POLICY)
 
 
 def bounds(model, windows):
@@ -81,11 +84,19 @@ def overtime_evidence(model):
     return sorted(unique.values(), key=lambda item: (item.get('timestamp', item.get('start')), item['source'], item.get('end', '')))
 
 
-def default_overtime_windows(model, observations=None):
-    """Union prior commit hours, clipped to the target day and outside NORMAL."""
+def default_overtime_windows(model, observations=None, *, policy=None):
+    """Union prior commit hours outside NORMAL and breaks; replay old policies exactly."""
     from build_time_blocks import parse_dt
     from commit_intervals import subtract_intervals
     main = bounds(model, main_windows(model))
+    policy = DEFAULT_OT_POLICY if policy is None else policy
+    if policy not in SUPPORTED_OT_POLICIES:
+        raise BlockIdentityError('Unsupported default OT policy')
+    excluded = list(main)
+    if policy == DEFAULT_OT_POLICY:
+        excluded.extend(bounds(model, validate_schedule(model.get('work_schedule', {}))['breaks']))
+    elif policy == WORK_DAY_OT_POLICY:
+        excluded.extend(bounds(model, [{'start': '12:00', 'end': '13:30'}]))
     date, tz = datetime.date.fromisoformat(model['date']), main[0][0].tzinfo
     midnight = datetime.datetime.combine(date, datetime.time(), tzinfo=tz)
     pieces = []
@@ -95,7 +106,7 @@ def default_overtime_windows(model, observations=None):
         end = parse_dt(item['timestamp']).astimezone(tz).replace(second=0, microsecond=0)
         start = max(midnight, (end.astimezone(datetime.timezone.utc)
                               - datetime.timedelta(minutes=60)).astimezone(tz))
-        for left, right in subtract_intervals(start, end, main):
+        for left, right in subtract_intervals(start, end, excluded):
             # HH:MM cannot represent an ambiguous repeated clock differently
             # from local_clock's fold=0; reject rather than silently changing time.
             for boundary in (left, right):
@@ -113,12 +124,13 @@ def default_overtime_windows(model, observations=None):
     return validate_work_windows(windows) if windows else []
 
 
-def initial_review(model, *, default_policy=True):
+def initial_review(model, *, default_policy=True, work_day=False):
     observations = overtime_evidence(model)
     if default_policy:
-        windows = default_overtime_windows(model, observations)
+        policy = WORK_DAY_OT_POLICY if work_day else DEFAULT_OT_POLICY
+        windows = default_overtime_windows(model, observations, policy=policy)
         return {'status': 'defaulted' if windows else 'not_needed', 'observations': observations,
-                'confirmed_windows': windows, 'policy': copy.deepcopy(DEFAULT_OT_POLICY)}
+                'confirmed_windows': windows, 'policy': copy.deepcopy(policy)}
     return {'status': 'pending' if observations else 'not_needed',
             'observations': observations, 'confirmed_windows': []}
 
@@ -131,7 +143,7 @@ def validate_review(model):
     if not isinstance(review, dict) or set(review) != fields:
         raise BlockIdentityError('OT review requires status, observations and confirmed_windows')
     automatic = 'policy' in review
-    if automatic and review['policy'] != DEFAULT_OT_POLICY:
+    if automatic and review['policy'] not in SUPPORTED_OT_POLICIES:
         raise BlockIdentityError('Unsupported default OT policy')
     states = ('defaulted', 'not_needed', 'declined', 'confirmed') if automatic else ('pending', 'not_needed', 'declined', 'confirmed')
     if review['status'] not in states:
@@ -142,7 +154,7 @@ def validate_review(model):
             or review['status'] == 'not_needed' and not automatic and review['observations']):
         raise BlockIdentityError('OT confirmation status conflicts with outside activity')
     if automatic and review['status'] in ('defaulted', 'not_needed'):
-        expected = default_overtime_windows(model, review['observations'])
+        expected = default_overtime_windows(model, review['observations'], policy=review['policy'])
         if (review['confirmed_windows'] != expected
                 or (review['status'] == 'defaulted') != bool(expected)):
             raise BlockIdentityError('Default OT windows conflict with the frozen commit-hour policy')

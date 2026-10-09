@@ -253,7 +253,9 @@ class TestSummaryRequest(unittest.TestCase):
             return subprocess.CompletedProcess(command, 0, stdout='codex-cli synthetic\n')
         directory = Path(command[command.index('--output-last-message') + 1]).parent
         request = json.loads((directory / 'request.json').read_text())
-        if 'jobs' in request:
+        if 'merge_candidates' in request:
+            judgments = [{'job_ids': [j['id']], 'description': 'Update features'} for j in request['jobs']]
+        elif 'jobs' in request:
             judgments = [{'id': j['id'], 'description': 'Update features'} for j in request['jobs']]
         else:
             judgments = [{'block_id': b['block_id'], 'description': 'Update features'} for b in request['blocks']]

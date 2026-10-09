@@ -13,7 +13,6 @@ Outputs a source-status envelope; never substitutes fixtures for live results.
 
 import argparse
 import datetime
-import json
 import os
 import sys
 from typing import List, Dict, Any, Optional

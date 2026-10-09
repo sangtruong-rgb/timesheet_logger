@@ -105,7 +105,7 @@ class TestWindowPipeline(unittest.TestCase):
     def test_v6_freezes_windows_and_replays_without_profile_or_collection(self):
         self.assertEqual(self.prepare(), (0, 3))
         snapshot = read_snapshot(self.snapshot)
-        self.assertEqual(snapshot['schema_version'], 6)
+        self.assertEqual(snapshot['schema_version'], 9)
         self.assertEqual(snapshot['normalized']['work_confirmation']['windows'], WINDOWS)
         self.profile.write_text('{broken')
         self.assertEqual(self.invoke('--phase', 'assemble', '--snapshot', str(self.snapshot)), (0, 0))

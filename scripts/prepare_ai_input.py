@@ -12,29 +12,39 @@ Filters out all unnecessary fields:
 The audit envelope retains block identities, PR references and review evidence.
 The model request shares text across semantic jobs without changing intervals.
 Payload v3 shares descriptions across pieces of one commit allocation.
-Only the compact request is byte-bounded in v2/v3; older snapshots remain reproducible.
+Payload v4 preserves PR actions and distinguishes association from completed scope.
+Payload v5 adds opaque adjacency candidates for workstream grouping in the same AI call.
+Payload v6 summarizes related work sessions, including their integration steps.
+Only the compact request is byte-bounded in v2+; older snapshots remain reproducible.
 Token estimates are heuristic. No persistent judgment cache is implemented.
 """
 
 import argparse
 import json
-import re
 import sys
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from block_identity import get_block_id, index_blocks
 from activity_review import minimal_review, unpack_activity_snapshot
 
 from activity_text import extract_tickets
 
 
-def prepare_ai_payload_for_block(block: Dict[str, Any]) -> Dict[str, Any]:
+def prepare_ai_payload_for_block(block: Dict[str, Any], *, include_pr_actions=False) -> Dict[str, Any]:
     calendar_titles = list(dict.fromkeys(t.strip() for t in block.get("calendar_titles", []) if t.strip()))
     commit_messages = list(dict.fromkeys(c.get("message", "").strip() for c in block.get("commits", []) if c.get("message", "").strip()))
     prs = [{"id": p.get("id"), "title": p.get("title", "").strip(),
             **({"repository": p["repository"]} if p.get("repository") else {})}
            for p in block.get("prs", []) if p.get("id") is not None]
     prs = list({(p.get("repository", ""), p["id"]): p for p in prs}.values())
+    if include_pr_actions:
+        for pr in prs:
+            sources = [p for p in block.get('prs', [])
+                       if (p.get('repository', ''), p['id']) == (pr.get('repository', ''), pr['id'])]
+            pr['actions'] = sorted({e['action'] for p in sources for e in p.get('events', [])})
+            pr['commit_association'] = any(
+                (p.get('repository', ''), p['id']) == (pr.get('repository', ''), pr['id'])
+                for c in block.get('commits', []) for p in c.get('pr_association', {}).get('prs', []))
 
     # Pre-extract ticket keys if any
     all_text = commit_messages + [p["title"] for p in prs]
@@ -60,13 +70,13 @@ def prepare_ai_payload_for_block(block: Dict[str, Any]) -> Dict[str, Any]:
     return payload
 
 
-def prepare_all_blocks(blocks: List[Dict[str, Any]], *, include_summary_groups=False) -> List[Dict[str, Any]]:
+def prepare_all_blocks(blocks: List[Dict[str, Any]], *, include_summary_groups=False, include_pr_actions=False) -> List[Dict[str, Any]]:
     index_blocks(blocks)
     payloads = []
     for b in blocks:
         if not b.get("commits") and not b.get("prs"):
             continue  # Calendar-only summaries use the event title; no AI judgment needed.
-        payload = prepare_ai_payload_for_block(b)
+        payload = prepare_ai_payload_for_block(b, include_pr_actions=include_pr_actions)
         if include_summary_groups:
             from summary_request import commit_summary_group_id
             group = commit_summary_group_id(b)
@@ -76,14 +86,25 @@ def prepare_all_blocks(blocks: List[Dict[str, Any]], *, include_summary_groups=F
     return payloads
 
 
-def prepare_activity_input(blocks, unassigned_activity, max_bytes=12000, *, payload_version=3):
+def prepare_activity_input(blocks, unassigned_activity, max_bytes=12000, *, payload_version=None):
     from block_identity import BlockIdentityError
-    if type(payload_version) is not int or payload_version not in (1, 2, 3):
+    if payload_version is None:
+        payload_version = 6 if any(b.get('commit_grouping') for b in blocks) else 3
+    if type(payload_version) is not int or payload_version not in (1, 2, 3, 4, 5, 6):
         raise BlockIdentityError("Unsupported AI payload version")
-    payload = {"blocks": prepare_all_blocks(blocks, include_summary_groups=payload_version >= 3),
+    payload = {"blocks": prepare_all_blocks(blocks, include_summary_groups=payload_version in (3, 4),
+                                           include_pr_actions=payload_version >= 4),
             "unassigned_activity": minimal_review(unassigned_activity),
             "review": {"status": "required" if unassigned_activity else "none",
                        "instruction": "Summarize only blocks. Unassigned activity needs human review; do not attach it to a block or infer work duration."}}
+    if payload_version >= 5:
+        from workstream_groups import candidate_segments
+        segments = {key: f's{i + 1}' for i, segment in enumerate(candidate_segments(blocks)) for key in segment}
+        payload['blocks'].sort(key=lambda b: (b['date'], b['block']['start']))
+        for block in payload['blocks']:
+            block['workstream_segment'] = segments.get(block['block_id'])
+            if payload_version >= 6:
+                block['session_grouping'] = 'related_work_session_v1'
     if not isinstance(max_bytes, int) or isinstance(max_bytes, bool) or max_bytes < 1:
         raise BlockIdentityError("AI byte limit must be a positive integer")
     if payload_version >= 2:

@@ -14,7 +14,6 @@ Captures:
 import argparse
 import datetime
 import json
-import os
 import re
 import subprocess
 import sys
@@ -23,7 +22,7 @@ from typing import List, Dict, Any, Optional, Tuple
 
 from activity_settings import add_settings_arguments, day_bounds, identity_match, settings_from_args, timezone_settings
 from collection_result import SourceUnavailable, collection_result, emit_result
-from github_api import GitHubAPI, GitHubAPIError, check_gh_cli
+from github_api import GitHubAPI, GitHubAPIError
 
 
 def get_local_timezone() -> datetime.tzinfo:

@@ -40,8 +40,12 @@ and optional overtime windows can be configured in `work_schedule`.
   That explicit per-day confirmation permits work outside regular hours or on a
   nonworking date. It does not imply a reusable profile start, confirmed attendance
   or extra work after the final commit. Configured breaks and Calendar coverage are
-  still excluded. The under-20-minute merge rule and shared allocation descriptions
-  remain unchanged.
+  still excluded. During prepare, new pipeline runs group adjacent pieces by verified
+  PR or a unique ticket after a successful empty PR lookup. Payload v6 then permits
+  AI to group related implementation, fixes, tests and integration into a shared
+  work session during summary, even across feature/PR boundaries;
+  Python revalidates boundaries and preserves all minutes and evidence. See
+  [the grouping review](workflow-steps.md). Older snapshots retain their rules.
 - Calendar proposals are kept on all days, including outside regular/confirmed
   hours, with attendance unconfirmed. Breaks do not produce work rows. Overtime
   windows permit evidence-based proposals but do not apply an automatic OT billing
@@ -87,8 +91,8 @@ clocks and nonexistent local DST boundaries fail before source collection.
   unconfirmed. Commits/PRs outside the windows are review-only. Commits exactly
   at a window end can close the work leading to that boundary.
 - The last supplied end is confirmed: include the remaining tail even after the
-  final commit, using estimated duration. The under-20-minute merge operates on
-  work minutes after gaps/Calendar exclusions; shared descriptions remain intact.
+  final commit, using estimated duration. PR/ticket grouping happens after
+  gaps/Calendar exclusions and never absorbs the confirmed-end tail.
 - Snapshots with explicit windows use **v6** and freeze the canonical windows
   inside `work_confirmation`. Assembly cannot change them, does not collect again,
   and replays them even if the profile changes. V1–v5 retain their prior behavior.
@@ -103,7 +107,14 @@ summary/assembly without a question, reply or waiting period. The preview shows
 the default estimate and allows user-requested changes. PR/Calendar activity alone
 does not create a default commit hour; Calendar attendance remains unconfirmed.
 
-Only the part outside main and within the target local day counts. Overlapping,
+Only the part outside main, outside breaks and within the target local day counts.
+New range runs exclude the frozen profile's configured breaks (default
+12:00–13:30). Morning-start shorthand always excludes its fixed 12:00–13:30 lunch,
+even if profile breaks differ. A lunchtime commit remains evidence for review;
+it does not establish that lunch was worked. Explicit user-supplied OT windows
+remain overrides. Historical snapshots retain their recorded policy and totals;
+prepare a new run to apply the corrected default.
+Overlapping,
 duplicate and adjacent OT windows are united before allocation, preserving all
 commit evidence without duplicate minutes. With main ending 16:00:
 
@@ -131,7 +142,7 @@ the new snapshot. It records an explicit override, a new run ID and parent linka
 no source collection is repeated. New rows distinguish `default_commit_hour`
 from `user_override` in `overtime_confirmation.approval_basis`. Hours remain
 estimated, not measured attendance. NORMAL/OT boundaries split rows with shared
-allocation topics, short allocations merge only with a preceding piece of the
+allocation topics, adjacent allocations with the same verified PR/ticket merge only within the
 same type, and the writer rejects incorrect classifications. Markdown and the
 collection manifest include separate NORMAL/OT totals.
 

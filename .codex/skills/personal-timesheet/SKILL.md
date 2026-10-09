@@ -7,7 +7,19 @@ description: Build and optionally submit a daily work log from verified GitHub a
 
 Run the repository's deterministic pipeline and use Codex only to summarize its small AI payload. Treat generated time as proposed unless the source measures attendance or duration.
 
+Use English for all user-facing communication, including clarifying questions,
+progress updates, explanations, errors and final reports, even when the request
+is written in Vietnamese. Preserve original source evidence and proper names.
+
 ## Short invocation
+
+If the user's request includes `OT confirmed` or `attendance confirmed`, read
+[the confirmation rules](../personal-timesheet-confirmed/SKILL.md) once and apply
+only the declarations supplied. For example, `$personal-timesheet 9:00, OT
+confirmed, attendance confirmed` confirms both for the selected date. Separate
+the confirmation phrases from the clock/window text before passing hours to
+Python. These are user declarations, not automatic permission to publish.
+Continue the shared workflow here without recursive skill loading or recollection.
 
 `$personal-timesheet 09:00` is a complete request: the clock is the user's
 confirmed morning start for today in the configured timezone. Use
@@ -34,8 +46,8 @@ clarification of the rejected input. The dedicated `$personal-timesheet-windows`
 skill supports the same workflow.
 
 Proceed without reconfirming the supplied start, today's date, the configured
-sources, or preview mode. With no start, ask only "Hôm nay bạn bắt đầu làm lúc
-mấy giờ?" (use the target date if supplied). For an invalid or ambiguous clock,
+sources, or preview mode. With no start, ask only "What time did you start work
+today?" (use the target date if supplied). For an invalid or ambiguous clock,
 ask for clarification rather than guessing. When only a morning start is supplied,
 use the approved noon / five-hour afternoon default; do not ask for an end or
 mid-session breaks just to complete the preview.
@@ -101,7 +113,9 @@ sample, historical export, or older snapshot.
 For explicit windows, `--review-ot` applies the approved default;
 `--work-day-start` enables it automatically: 60 minutes
 ending at each outside-main commit (minute precision), subtracting main coverage
-and merging overlapping OT windows. Snapshot v8 freezes the rule and approval
+and breaks, then merging overlapping OT windows. New range runs exclude the frozen
+profile breaks (default 12:00–13:30); morning-start shorthand always excludes
+12:00–13:30. Historical snapshots replay their recorded policy unchanged. Snapshot v8 freezes the rule and approval
 basis; `defaulted` counts as approved by the standing user rule. Continue to
 summary/assembly without asking for approval or waiting for a reply. Show the
 estimated default OT intervals in the preview so the user can request changes.
@@ -123,7 +137,7 @@ When `TS_AI_INPUT` has eligible blocks, run one isolated Codex summary invocatio
   --codex "$(command -v codex)"
 ```
 
-The runner sends only the compact frozen payload, validates every returned `block_id`, and writes `codex/ai-output.json`, `codex/events.jsonl`, and `codex/usage-run.json`. Do not separately summarize the blocks in the outer skill session. If there are no eligible blocks, skip the runner and assemble without AI output or a usage manifest.
+The runner sends only the compact frozen payload, validates every returned `block_id` and proposed group, and writes `codex/ai-output.json`, `codex/events.jsonl`, and `codex/usage-run.json`. Do not separately summarize the blocks in the outer skill session. If there are no eligible blocks, skip the runner and assemble without AI output or a usage manifest.
 
 Assemble the same immutable snapshot:
 
@@ -146,7 +160,7 @@ names. Keep original source text for audit; do not translate or rewrite evidence
 The script fallback uses English evidence-based templates, not title translation.
 Timesheet previews and final reports must also be in English, including table
 headings, attendance/status labels, totals, review notes and token-usage notes.
-Clarifying questions and discussion outside the report may use the user's language.
+Clarifying questions and discussion outside the report must also be in English.
 
 ## Review and attendance
 
@@ -156,19 +170,29 @@ Clarifying questions and discussion outside the report may use the user's langua
   12:00–13:30) and Calendar coverage. With explicit daily windows, exclude gaps
   outside those windows instead of profile breaks, and clip Calendar to the windows.
   This explicitly assumes continuous work between boundaries; it does not measure
-  task duration. A commit allocation with 1–19 work minutes after exclusions merges
-  into the previous commit allocation, preserving all commit/PR evidence; consecutive
-  short allocations accumulate backward. Keep the first allocation when no predecessor
-  exists, zero-work allocations, 20 minutes or more and confirmed-end tails separate.
-  Decide merging before splitting around lunch/Calendar; never fill excluded time or
-  pad a short allocation to 20 minutes. New snapshots freeze this rule; existing
-  snapshots retain their original intervals. There is no 90-minute cap or mid-session break.
-  The closing commit describes all split pieces of that interval and may occur
-  outside a piece. New payloads use one shared topic description for pieces of the
-  same allocation, combining PR context while preserving each row's own PR suffix,
-  evidence and hours. Different allocations keep separate descriptions; frozen
-  older payloads retain their original behavior. PR actions add context without
-  adding time. An accepted policy
+  task duration. During prepare, group adjacent development pieces by verified
+  repository-qualified PR/ticket identity. Failed or ambiguous lookups do not
+  establish shared PR identity. Snapshot v9 freezes this stage and its evidence.
+  New AI payload v6 uses the same isolated summary call to group related work
+  sessions, broader than an individual feature or PR. Prefer grouping related
+  implementation, fixes, tests, reports and integration of a shared workflow or
+  deliverable. Merge-only jobs join adjacent related work; do not split merely
+  because PRs, components or commit types differ. Short duration, a common repo
+  or PR absence alone is insufficient. Keep distinct objectives or uncertain work
+  separate, without a
+  target row count. The script accepts only consecutive groups inside supplied
+  candidates: no crossing gaps, Calendar, repo or NORMAL/OT boundaries, no absorbing
+  confirmed-end tails, and no new group over four hours. It preserves total minutes,
+  source evidence and the union of PR references, appending the PR suffix itself.
+  Use one short outcome-focused English sentence per session; add a second only
+  if needed. Do not list every commit or merge as a separate task.
+  Review `codex/grouping.json` or `timesheet-steps show "$TS_RUN" grouping` for
+  before/after counts and source block IDs. Final JSON retains source allocations.
+  Invalid grouping stops the run with usage retained. Without AI, keep deterministic
+  PR/ticket grouping. Older payloads retain their original description/grouping
+  behavior and instructions; a fresh prepare run is required to adopt v6. PR actions provide context
+  without adding time. The closing commit may occur outside a split piece; it does
+  not prove attendance. An accepted policy
   plus confirmed daily hours does not require another per-block boundary approval.
 - Treat `inferred_activity_boundaries` as review-required. Report the clustered intervals and do not publish them until the user confirms or overrides their start/end times.
 - Do not attach unassigned activity to a block or invent its duration.

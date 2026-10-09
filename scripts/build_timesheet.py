@@ -253,7 +253,8 @@ def build_entries(
         }
         entries.append(entry_record)
 
-    return entries
+    from workstream_groups import merge_entries
+    return merge_entries(blocks, entries, ai_by_key)
 
 
 def main():
@@ -279,9 +280,9 @@ def main():
             if not isinstance(data['ai_input'], dict):
                 raise AIJudgmentError('Invalid frozen AI input')
             version = data['ai_input'].get('payload_version', 1)
-            if type(version) is not int or version not in (1, 2, 3):
+            if type(version) is not int or version not in (1, 2, 3, 4, 5, 6):
                 raise AIJudgmentError('Unsupported frozen AI payload version')
-        payloads = prepare_all_blocks(blocks, include_summary_groups=version >= 3)
+        payloads = prepare_all_blocks(blocks, include_summary_groups=version in (3, 4))
         entries = build_entries(blocks, load_ai_judgments(args.ai_output),
                                 summary_groups=commit_group_mapping(payloads))
     except (ValueError, OSError) as exc:

@@ -9,8 +9,9 @@ usage() {
 Usage:
   ./bin/personal-timesheet-codex
   ./bin/personal-timesheet-codex 09:00
+  ./bin/personal-timesheet-codex "9:00, OT confirmed, attendance confirmed"
   ./bin/personal-timesheet-codex "8:00-12:00, 1h30-4:00"
-  ./bin/personal-timesheet-codex "Chạy workflow cho ngày YYYY-MM-DD ..."
+  ./bin/personal-timesheet-codex "Preview my work for YYYY-MM-DD ..."
   ./bin/personal-timesheet-codex --check
 
 This launcher opens a new Codex session with network and macOS credential-store
@@ -67,7 +68,7 @@ if [[ "${1:-}" == "--check" ]]; then
   exit 0
 fi
 
-request="${*:-Chạy workflow cho hôm nay bằng nguồn GitHub và Google Calendar thật. Chỉ tạo bản xem trước, chưa gửi lên Gradion. Báo actual Codex token usage ở cuối; nếu không có AI block thì ghi SKIPPED, không tự điền 0.}"
+request="${*:-Preview work for today using live GitHub and Google Calendar sources. Do not publish to Gradion. Report actual Codex token usage; if no AI block is eligible, report SKIPPED instead of inventing zero usage.}"
 
 # Live GitHub access needs the macOS credential store, and both live providers
 # need outbound network access. A normal workspace-write Codex sandbox hides
@@ -77,4 +78,4 @@ exec codex \
   --sandbox danger-full-access \
   --ask-for-approval on-request \
   --config model_reasoning_effort=low \
-  "\$personal-timesheet $request"
+  "\$personal-timesheet Use English for all communication with me, including questions, progress updates and reports. $request"
