@@ -141,7 +141,7 @@ class TestCalendarGapLunch(unittest.TestCase):
         self.assertEqual(len(blocks), 1)
         self.assertEqual(blocks[0]['time_basis'], 'scheduled')
         self.assertEqual(blocks[0]['duration_minutes'], 90)
-        self.assertEqual(build_entries(blocks)[0]['entry']['description'], 'Client lunch. PRs: None')
+        self.assertEqual(build_entries(blocks)[0]['entry']['description'], 'Scheduled calendar activity; attendance unconfirmed. PRs: None')
 
     def test_lunch_only_pr_creates_no_gap_and_evidence_is_preserved(self):
         pr = {'id': 101, 'repository': 'test/project', 'title': 'Payment', 'events': [

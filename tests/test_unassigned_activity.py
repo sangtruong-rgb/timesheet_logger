@@ -40,7 +40,7 @@ class TestTimestampAssignment(unittest.TestCase):
         activity = pr()
         blocks, review = assignment(model([meeting()], prs=[activity]))
         self.assertEqual(blocks[0]['prs'], [])
-        self.assertEqual(build_entries(blocks)[0]['entry']['description'], 'Kickoff. PRs: None')
+        self.assertEqual(build_entries(blocks)[0]['entry']['description'], 'Scheduled calendar activity; attendance unconfirmed. PRs: None')
         self.assertEqual(review, [{'source': 'github', 'reason': 'outside_blocks', 'activity': activity}])
 
     def test_commits_do_not_fall_into_first_development_block_or_last_meeting(self):

@@ -52,7 +52,7 @@ def subtract_intervals(start, end, excluded):
 
 def build_commit_intervals(model, date, tz, unassigned, *, merge_short_commits=True,
                            short_commit_merge_minutes=SHORT_COMMIT_MERGE_MINUTES,
-                           allocation_version=2):
+                           allocation_version=2, work_types=None, allow_minute_end_commits=False):
     from build_time_blocks import build_time_blocks, parse_dt, calculate_minutes
     from get_pr_activity import deduplicate_prs
 
@@ -123,8 +123,10 @@ def build_commit_intervals(model, date, tz, unassigned, *, merge_short_commits=T
     commits = model.get("commits", [])
     for index, commit in enumerate(commits):
         instant = timestamp(commit)
-        if (instant is not None and start < instant < day_end and (finish is None or instant <= finish)
-                and (windows is None or any(left < instant <= right for left, right in windows))):
+        boundary_instant = (instant.replace(second=0, microsecond=0)
+                            if instant is not None and allow_minute_end_commits else instant)
+        if (boundary_instant is not None and start < boundary_instant < day_end and (finish is None or boundary_instant <= finish)
+                and (windows is None or any(left < boundary_instant <= right for left, right in windows))):
             minute = instant.replace(second=0, microsecond=0)
             if minute > start:
                 groups.setdefault(minute, []).append((index, commit))
@@ -133,6 +135,9 @@ def build_commit_intervals(model, date, tz, unassigned, *, merge_short_commits=T
 
     def append_work(left, right, closing, merged_intervals=None):
         pieces = list(subtract_intervals(left, right, excluded))
+        if work_types is not None:
+            pieces = [(max(left, start), min(right, end)) for left, right in pieces
+                      for start, end, _ in sorted(work_types) if max(left, start) < min(right, end)]
         evidence = [c for _, c in sorted(closing, key=lambda pair: (pair[1].get("repository", ""), pair[1].get("hash", "")))]
         allocation = {"start": left.isoformat(), "end": right.isoformat(),
                       "basis": "ending_commit" if closing else "confirmed_end",
@@ -169,16 +174,24 @@ def build_commit_intervals(model, date, tz, unassigned, *, merge_short_commits=T
         minutes = sum(calculate_minutes(left, right)
                       for left, right in subtract_intervals(cursor, boundary, excluded))
         original = {"start": cursor.isoformat(), "end": boundary.isoformat()}
+        typed_pieces = ([kind for left, right in subtract_intervals(cursor, boundary, excluded)
+                        for start, end, kind in sorted(work_types) if start < right and left < end]
+                       if work_types is not None else [])
+        kinds = set(typed_pieces) if work_types is not None else None
+        last_kind = typed_pieces[-1] if typed_pieces else None
+        same_kind = (work_types is None or len(kinds) == 1 and allocations
+                     and allocations[-1]['last_kind'] in kinds)
         if (merge_short_commits and 0 < minutes < short_commit_merge_minutes and allocations
-                and allocations[-1]['work_minutes'] > 0):
+                and allocations[-1]['work_minutes'] > 0 and same_kind):
             previous = allocations[-1]
             previous['end'] = boundary
             previous['closing'].extend(closing)
             previous['work_minutes'] += minutes
             previous['intervals'].append(original)
+            previous['last_kind'] = last_kind
         else:
             allocations.append({'start': cursor, 'end': boundary, 'closing': list(closing),
-                                'work_minutes': minutes, 'intervals': [original]})
+                                'work_minutes': minutes, 'intervals': [original], 'last_kind': last_kind})
         cursor = boundary
     for allocation in allocations:
         append_work(allocation['start'], allocation['end'], allocation['closing'],
@@ -186,6 +199,19 @@ def build_commit_intervals(model, date, tz, unassigned, *, merge_short_commits=T
     if finish is not None and cursor < finish:
         append_work(cursor, finish, [])
     blocks.sort(key=lambda b: (b["start_time"], b["end_time"]))
+    if work_types is not None:
+        typed_blocks = []
+        for block in blocks:
+            left, right = (parse_dt(block['interval'][field]) for field in ('start', 'end'))
+            for start, end, kind in sorted(work_types):
+                piece_start, piece_end = max(left, start), min(right, end)
+                if piece_start < piece_end:
+                    typed_blocks.append({**block, 'start_time': piece_start.strftime('%H:%M'),
+                                         'end_time': '24:00' if piece_end == day_end else piece_end.strftime('%H:%M'),
+                                         'duration_minutes': calculate_minutes(piece_start, piece_end),
+                                         'interval': {'start': piece_start.isoformat(), 'end': piece_end.isoformat()},
+                                         'work_type': kind, 'commits': list(block['commits']), 'prs': []})
+        blocks = sorted(typed_blocks, key=lambda b: (b['start_time'], b['end_time']))
 
     def assign_by_timestamp(activity, field):
         instant = timestamp(activity)
@@ -216,7 +242,8 @@ def build_commit_intervals(model, date, tz, unassigned, *, merge_short_commits=T
         instant = timestamp(action)
         if (allocation_version < 2 or action.get('status') != 'merged' or not sha
                 or instant is None or not start <= instant < day_end
-                or (finish is not None and instant > finish)):
+                or (finish is not None and (instant.replace(second=0, microsecond=0)
+                                           if allow_minute_end_commits else instant) > finish)):
             return False
         matches = []
         for block in blocks:

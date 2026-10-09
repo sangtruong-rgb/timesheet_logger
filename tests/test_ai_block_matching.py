@@ -36,7 +36,8 @@ class TestAIBlockMatching(unittest.TestCase):
         original = copy.deepcopy(self.blocks)
         entries = build_entries(self.blocks, judgments)
         self.assertNotIn("AI payment summary", entries[0]["entry"]["description"])
-        self.assertIn("Daily stand-up", entries[0]["entry"]["description"])
+        self.assertIn("attendance unconfirmed", entries[0]["entry"]["description"])
+        self.assertEqual(entries[0]["sources"]["calendar"], ["Daily stand-up"])
         self.assertEqual(entries[0]["summary_source"], "fallback")
         self.assertEqual(entries[1]["entry"]["description"], "AI payment summary. PRs: #101")
         self.assertEqual(entries[1]["summary_source"], "ai")
@@ -124,7 +125,8 @@ class TestAIBlockMatching(unittest.TestCase):
         for value in (None, []):
             entries = build_entries(self.blocks, value)
             self.assertEqual([e["summary_source"] for e in entries], ["fallback", "fallback"])
-            self.assertIn("Daily stand-up", entries[0]["entry"]["description"])
+            self.assertIn("attendance unconfirmed", entries[0]["entry"]["description"])
+            self.assertEqual(entries[0]["sources"]["calendar"], ["Daily stand-up"])
             self.assertEqual(entries[1]["sources"]["commits"], self.blocks[1]["commits"])
 
     def test_duplicate_candidate_identity_is_rejected_before_ai_preparation_or_assembly(self):

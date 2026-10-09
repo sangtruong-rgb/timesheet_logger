@@ -93,6 +93,54 @@ clocks and nonexistent local DST boundaries fail before source collection.
   inside `work_confirmation`. Assembly cannot change them, does not collect again,
   and replays them even if the profile changes. V1–v5 retain their prior behavior.
 
+## OT outside the main windows
+
+Codex range skills prepare with `--review-ot`. Main windows define NORMAL,
+including an earlier/custom shift. Under the user's approved standing rule,
+each outside-main commit creates an estimated **60 minutes ending at that commit**
+(at minute precision). New v8 snapshots use `defaulted` approval and proceed to
+summary/assembly without a question, reply or waiting period. The preview shows
+the default estimate and allows user-requested changes. PR/Calendar activity alone
+does not create a default commit hour; Calendar attendance remains unconfirmed.
+
+Only the part outside main and within the target local day counts. Overlapping,
+duplicate and adjacent OT windows are united before allocation, preserving all
+commit evidence without duplicate minutes. With main ending 16:00:
+
+- Commit 18:00 → OT 17:00–18:00 (60m), leaving 16:00–17:00 excluded.
+- Commit 16:20 → OT 16:00–16:20 (20m); 15:20–16:00 is already NORMAL.
+- Commits 18:00 and 18:30 → OT union 17:00–18:30 (90m).
+- Commits 18:00 and 21:00 → 17:00–18:00 / 20:00–21:00 (120m), keeping the gap.
+- Commit 00:30 → 00:00–00:30 (30m) on the selected date; no minutes are moved to
+  the previous day's snapshot. Ambiguous DST clocks that cannot be represented
+  faithfully in HH:MM are rejected rather than silently changing duration.
+
+When the user requests an override, preserve the original and derive a new
+snapshot from its frozen sources:
+
+```bash
+python3 scripts/run_pipeline.py --phase confirm-ot \
+  --snapshot data/audit/my-run/activity.json \
+  --resolved-snapshot data/audit/my-run/activity-ot-override.json \
+  --ot-windows "17:30-18:00" \
+  --export-ai-input data/audit/my-run/ai-input-ot-override.json
+```
+
+For no OT, replace `--ot-windows` with `--decline-ot`. Then summarize and assemble
+the new snapshot. It records an explicit override, a new run ID and parent linkage;
+no source collection is repeated. New rows distinguish `default_commit_hour`
+from `user_override` in `overtime_confirmation.approval_basis`. Hours remain
+estimated, not measured attendance. NORMAL/OT boundaries split rows with shared
+allocation topics, short allocations merge only with a preceding piece of the
+same type, and the writer rejects incorrect classifications. Markdown and the
+collection manifest include separate NORMAL/OT totals.
+
+No BREAK input or work row is added. Plain Python requests without `--review-ot`
+and single-start skill requests retain their existing behavior. V1–v7 snapshots
+replay their frozen rules; an old v7 pending decision still needs actual user hours,
+and is not silently upgraded to the new default. V8 freezes the policy, default
+windows, approval basis and overrides.
+
 ## Frozen evidence and output
 
 `run_pipeline.py` validates configuration before collecting sources. The normalize

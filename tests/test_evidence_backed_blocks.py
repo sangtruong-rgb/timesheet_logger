@@ -36,7 +36,7 @@ class TestEvidenceBackedBlocks(unittest.TestCase):
         self.assertEqual((blocks[0]["start_time"], blocks[0]["end_time"], blocks[0]["duration_minutes"]), ("09:00", "09:30", 30))
         self.assertEqual(blocks[0]["time_basis"], "scheduled")
         entries = build_entries(blocks)
-        self.assertEqual(entries[0]["entry"]["description"], "Daily stand-up. PRs: None")
+        self.assertEqual(entries[0]["entry"]["description"], "Scheduled calendar activity; attendance unconfirmed. PRs: None")
 
     def test_empty_gaps_before_between_and_after_events_disappear(self):
         events = [event("10:00", "10:30", "Planning"), event("14:00", "14:30", "Review meeting")]
@@ -136,7 +136,8 @@ class TestEvidenceBackedBlocks(unittest.TestCase):
         for title in ("Daily stand-up", "Planning", "Design review meeting", "Sprint goals?", "Focus time"):
             with self.subTest(title=title):
                 entries = build_entries(build_time_blocks(model([event(title=title)])))
-                expected = title if title.endswith((".", "!", "?")) else title + "."
+                expected = "Scheduled calendar activity; attendance unconfirmed."
+                self.assertEqual(entries[0]["sources"]["calendar"], [title])
                 self.assertEqual(entries[0]["entry"]["description"], expected + " PRs: None")
 
     def test_estimate_metadata_survives_payload_and_ai_summary_assembly(self):

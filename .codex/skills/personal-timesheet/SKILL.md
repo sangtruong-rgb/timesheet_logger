@@ -54,7 +54,8 @@ launcher checks Codex login, GitHub authentication and Calendar dependencies.
 4. Use Python 3.11+ from the repository `.venv` when available. It must have `requirements-calendar.txt` installed.
 5. Preserve existing files and edits. Put every new artifact for one run under one unique `data/audit/company-antigravity-<timestamp>/` directory.
 6. When the request supplies windows, set `TS_WORK_WINDOWS` to the supplied
-   comma-separated text and `TS_HOURS_ARGS=(--work-windows "$TS_WORK_WINDOWS")`.
+   comma-separated text and
+   `TS_HOURS_ARGS=(--work-windows "$TS_WORK_WINDOWS" --review-ot)`.
    Do not also pass start/end flags or ask for a start already supplied by a window.
    Otherwise, for `commit_intervals`, use the user's confirmed start for this target date as
    `TS_WORK_START`. Ask for it only when absent; never assume 09:00 or reuse another
@@ -72,15 +73,16 @@ Live collection needs outbound network access and, on macOS, access to the GitHu
 credential store and Google OAuth token. These read-only source calls are authorized
 by the request. Follow the active environment's execution permissions.
 
-Run prepare with live sources:
+Set `TS_SNAPSHOT="$TS_RUN/activity.json"` and
+`TS_AI_INPUT="$TS_RUN/ai-input.json"`. Run prepare with live sources:
 
 ```bash
 "$TS_PYTHON" "$TS_ROOT/scripts/run_pipeline.py" --phase prepare \
   --config "$TS_ROOT/config/user-config.json" --date "$TS_DATE" \
   "${TS_HOURS_ARGS[@]}" \
   --timezone Asia/Ho_Chi_Minh \
-  --snapshot "$TS_RUN/activity.json" \
-  --export-ai-input "$TS_RUN/ai-input.json" \
+  --snapshot "$TS_SNAPSHOT" \
+  --export-ai-input "$TS_AI_INPUT" \
   --output-dir "$TS_RUN/timesheets"
 ```
 
@@ -91,11 +93,26 @@ available permissions. If any live source still fails, retain its diagnostic and
 draft, report `INCOMPLETE`, and stop dependent work. Never substitute a fixture,
 sample, historical export, or older snapshot.
 
-When `ai-input.json` has eligible blocks, run one isolated Codex summary invocation so usage is measured from `turn.completed.usage`:
+For window requests, `--review-ot` applies the approved default: 60 minutes
+ending at each outside-main commit (minute precision), subtracting main coverage
+and merging overlapping OT windows. Snapshot v8 freezes the rule and approval
+basis; `defaulted` counts as approved by the standing user rule. Continue to
+summary/assembly without asking for approval or waiting for a reply. Show the
+estimated default OT intervals in the preview so the user can request changes.
+PR/Calendar activity alone does not invent a commit-based hour. Calendar
+attendance remains unconfirmed.
+
+If the user explicitly requests changed OT hours or no OT, read
+[the OT override procedure](references/overtime.md) and resolve a new snapshot
+from the same frozen sources, updating `TS_SNAPSHOT`/`TS_AI_INPUT`. Never collect
+again to record an override. If replaying an old v7 `pending` snapshot, follow
+its original manual-hour rule; do not silently retrofit the new default.
+
+When `TS_AI_INPUT` has eligible blocks, run one isolated Codex summary invocation so usage is measured from `turn.completed.usage`:
 
 ```bash
 "$TS_PYTHON" "$TS_ROOT/scripts/run_codex_summary.py" \
-  --snapshot "$TS_RUN/activity.json" \
+  --snapshot "$TS_SNAPSHOT" \
   --run-dir "$TS_RUN/codex" \
   --codex "$(command -v codex)"
 ```
@@ -108,7 +125,7 @@ Assemble the same immutable snapshot:
 "$TS_PYTHON" "$TS_ROOT/scripts/run_pipeline.py" --phase assemble \
   --config "$TS_ROOT/config/user-config.json" --date "$TS_DATE" \
   --timezone Asia/Ho_Chi_Minh \
-  --snapshot "$TS_RUN/activity.json" \
+  --snapshot "$TS_SNAPSHOT" \
   --ai-output "$TS_RUN/codex/ai-output.json" \
   --usage-run-manifest "$TS_RUN/codex/usage-run.json" \
   --token-csv-path "$TS_RUN/token-usage.csv" \
@@ -116,6 +133,12 @@ Assemble the same immutable snapshot:
 ```
 
 Omit all three AI/usage arguments when no block needs an AI summary. Do not collect sources again between prepare and assemble. The measured scope is the isolated Codex summary invocation, including its CLI context; it does not claim usage for the surrounding interactive skill session or Python pipeline.
+
+Write all work-log descriptions in English, including NORMAL and OT rows, even
+when the user or source evidence uses Vietnamese. Preserve ticket keys and proper
+names. Keep original source text for audit; do not translate or rewrite evidence.
+The script fallback uses English evidence-based templates, not title translation.
+User-facing conversation may remain in the user's language.
 
 ## Review and attendance
 
@@ -143,11 +166,13 @@ Omit all three AI/usage arguments when no block needs an AI summary. Do not coll
 - Do not attach unassigned activity to a block or invent its duration.
 - Calendar status `confirmed` means the event exists, not that the user attended. Treat `self_response_status: needsAction`, `tentative`, or a missing self response as attendance unconfirmed.
 - A direct statement from the user that they attended is valid confirmation for the named interval.
-- Do not publish future scheduled meetings as attended. Keep them as `Theo lịch, chưa xác nhận tham dự` unless the user later confirms attendance.
+- Do not publish future scheduled meetings as attended. Keep them as `Scheduled; attendance unconfirmed` unless the user later confirms attendance.
 - Configurable profile hours, breaks, weekdays, holidays and overtime windows
   are supported; see `docs/work-schedule.md`. Explicit daily windows override
-  profile hours/breaks for that date. Automatic BREAK/OT billing labels remain
-  unsupported; do not infer those classifications.
+  profile hours/breaks for that date. Window requests label main rows NORMAL and
+  approved default or user-overridden outside intervals OT, with separate totals. Calendar
+  attendance is a separate fact. No BREAK rows or automatic billing mapping are
+  added. Single-start requests and older snapshots retain their previous flow.
 
 ## Publish to Gradion
 

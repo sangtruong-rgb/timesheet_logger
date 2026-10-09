@@ -46,7 +46,7 @@ class TestPipelineActivityReview(unittest.TestCase):
     def test_live_complete_with_review_keeps_pr_out_of_meeting_and_ai_block(self):
         self.assertEqual(self.pipeline([meeting()],prs=[pr()]),0,self.stderr.getvalue())
         row=self.read('')[0]
-        self.assertEqual(row['entry']['description'],'Kickoff. PRs: None')
+        self.assertEqual(row['entry']['description'],'Scheduled calendar activity; attendance unconfirmed. PRs: None')
         self.assertEqual(row['sources']['pull_requests'],[])
         review=self.read('.activity-review')
         self.assertEqual(review['unassigned_activity'][0]['activity']['id'],55)

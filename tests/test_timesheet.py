@@ -3,6 +3,7 @@
 test_timesheet.py - Unit tests for timesheet entry assembly and idempotent persistence.
 """
 
+import copy
 import tempfile
 import unittest
 import sys
@@ -79,6 +80,35 @@ class TestTimesheet(unittest.TestCase):
         desc = entries[0]["entry"]["description"]
         self.assertIn("[PAY-123]", desc)
         self.assertTrue(desc.endswith("PRs: None"))
+
+    def test_fallback_english_with_non_english_evidence_preserves_sources(self):
+        block = {
+            "date": "2026-10-09", "start_time": "09:00", "end_time": "10:00",
+            "duration_minutes": 60, "calendar_titles": ["Tập trung phát triển"],
+            "commits": [{"message": "PAY-123 sửa lỗi hóa đơn"}],
+            "prs": [{"id": 7, "title": "Thêm kiểm thử"},
+                    {"id": 7, "title": "Thêm kiểm thử", "status": "merged"}],
+        }
+        original = copy.deepcopy(block)
+        row = build_entries([block])[0]
+        self.assertEqual(row["entry"]["description"],
+                         "[PAY-123] Development activity based on 1 recorded commit and 1 pull request. PRs: #7")
+        self.assertEqual(row["sources"]["commits"], block["commits"])
+        self.assertEqual(row["sources"]["pull_requests"], block["prs"])
+        self.assertEqual(row["sources"]["calendar"], block["calendar_titles"])
+        self.assertEqual(block, original)
+
+    def test_calendar_fallback_english_does_not_claim_attendance(self):
+        for title in ("Họp kế hoạch", "项目会议", "hop ke hoach", "Planning"):
+            block = {"date": "2026-10-09", "start_time": "09:00", "end_time": "10:00",
+                     "duration_minutes": 60, "time_basis": "scheduled",
+                     "calendar_titles": [title], "commits": [], "prs": []}
+            with self.subTest(title=title):
+                row = build_entries([block])[0]
+                self.assertEqual(row["entry"]["description"],
+                                 "Scheduled calendar activity; attendance unconfirmed. PRs: None")
+                self.assertEqual(row["sources"]["calendar"], [title])
+                self.assertEqual(row["attendance"], "unconfirmed")
 
     def test_idempotent_upsert(self):
         entry_a = {

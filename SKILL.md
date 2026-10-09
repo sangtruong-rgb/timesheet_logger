@@ -60,8 +60,9 @@ print or commit credentials/token contents. Do not edit Calendar or infer attend
    use isolated paths printed by scripts; never enable them for a live request.
    PREPARED is not a completed final timesheet. Keep the snapshot's printed run ID.
 3. Read only the small AI export. Summarize `blocks`, at most one or two concise
-   sentences each. Do not summarize unassigned evidence into a block or invent work
-   duration, attendance or topics. Calendar-only blocks need no AI. Return a JSON
+   English sentences each, translating non-English evidence while preserving ticket keys
+   and proper names. Keep the original source text for audit. Do not summarize
+   unassigned evidence into a block or invent work duration, attendance or topics. Calendar-only blocks need no AI. Return a JSON
    array of `{ "block_id": "...", "description": "..." }`. Omit PR numbers and
    `PRs:`; scripts append the suffix. If no blocks need judgment, skip AI and omit
    --ai-output. The Python CLI never calls an external AI service.

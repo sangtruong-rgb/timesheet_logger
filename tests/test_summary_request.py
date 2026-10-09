@@ -105,7 +105,7 @@ class TestSummaryRequest(unittest.TestCase):
         work = [e for e in entries if e['time_basis'] == 'estimated']
         self.assertEqual([e['entry']['description'].split(' PRs:')[0] for e in work], ['Sửa CSV và kiểm thử.'] * 2)
         meeting = [e for e in entries if e['time_basis'] == 'scheduled'][0]
-        self.assertEqual(meeting['entry']['description'], 'Meeting. PRs: None')
+        self.assertEqual(meeting['entry']['description'], 'Scheduled calendar activity; attendance unconfirmed. PRs: None')
         self.assertEqual(meeting['attendance'], 'unconfirmed')
         self.assertEqual(meeting['summary_source'], 'fallback')
 
@@ -171,7 +171,7 @@ class TestSummaryRequest(unittest.TestCase):
         rows = json.loads((self.output / '2026-10-07.json').read_text())
         self.assertEqual(len(rows), 2)
         self.assertEqual([r['entry']['description'] for r in rows],
-                         ['Cập nhật tính năng. PRs: None', 'Cập nhật tính năng. PRs: #101'])
+                         ['Update features. PRs: None', 'Update features. PRs: #101'])
         files = [*self.output.glob('*'), self.directory / 'tokens.csv']
         original = {p: p.read_bytes() for p in files if p.is_file()}
         process = subprocess.run(command, capture_output=True, text=True)
@@ -254,9 +254,9 @@ class TestSummaryRequest(unittest.TestCase):
         directory = Path(command[command.index('--output-last-message') + 1]).parent
         request = json.loads((directory / 'request.json').read_text())
         if 'jobs' in request:
-            judgments = [{'id': j['id'], 'description': 'Cập nhật tính năng'} for j in request['jobs']]
+            judgments = [{'id': j['id'], 'description': 'Update features'} for j in request['jobs']]
         else:
-            judgments = [{'block_id': b['block_id'], 'description': 'Cập nhật tính năng'} for b in request['blocks']]
+            judgments = [{'block_id': b['block_id'], 'description': 'Update features'} for b in request['blocks']]
         (directory / 'response.json').write_text(json.dumps({'judgments': judgments}))
         events = [{'type': 'thread.started', 'thread_id': 'synthetic-' + directory.name}, {'type': 'turn.started'},
                   {'type': 'turn.completed', 'usage': {'input_tokens': 150, 'cached_input_tokens': 10, 'output_tokens': 15}}]
@@ -275,6 +275,10 @@ class TestSummaryRequest(unittest.TestCase):
         record = collect_run(result['usage_run_manifest'], ZoneInfo('Asia/Ho_Chi_Minh'))
         self.assertEqual(record['total_tokens'], 165)
         self.assertEqual(json.loads(record['notes'])['model_requested'], 'test-model')
+        instructions = (self.directory / 'compact' / 'instructions.txt').read_text()
+        self.assertIn('English timesheet descriptions', instructions)
+        self.assertIn('Translate non-English evidence', instructions)
+        self.assertEqual(json.loads(Path(result['ai_output']).read_text())[0]['description'], 'Update features')
         self.assertIn('shell_tool', self.command)
         self.assertIn('features.skip_host_skill_discovery=true', self.command)
         self.assertEqual(self.process_kwargs['cwd'], (self.directory / 'compact').resolve())
@@ -299,6 +303,8 @@ class TestSummaryRequest(unittest.TestCase):
         result = self.run_fake('legacy')
         self.assertEqual(collect_run(result['usage_run_manifest'], ZoneInfo('Asia/Ho_Chi_Minh'))['total_tokens'], 165)
         self.assertNotIn('--strict-config', self.command)
+        self.assertIn('timesheet blocks in English', self.process_kwargs['input'])
+        self.assertIn('translating non-English evidence', self.process_kwargs['input'])
 
     def test_benchmark_resume_verifies_evidence_without_new_ai_or_duplicate_usage(self):
         save_snapshot(self.snapshot, self.normalized, self.collection, self.blocks, self.review, self.ai)

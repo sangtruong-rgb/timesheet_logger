@@ -250,3 +250,68 @@ Validation: 609 tests passed, including 16 new parser/allocation/replay regressi
 and a synthetic Codex summary-to-assembly integration. Both Codex skills passed
 quick_validate; launcher syntax/help and git diff --check passed. No live source
 collection, model benchmark, publication, commit or push was performed for this change.
+
+
+## 2026-10-09 — One OT question with actual user-supplied hours
+
+The approved scope is OT outside the day's main windows, without new BREAK input.
+The user clarified that a commit timestamp cannot establish when OT started.
+Outside Git/PR observations now trigger a single question requesting actual OT
+start/end intervals or no OT. No duration, bucket or continuous tail is inferred
+from those timestamps. Calendar observations remain scheduled, attendance unconfirmed.
+
+Codex window skills opt into --review-ot. Snapshot v7 freezes the observations and
+OT decision. Pending decisions block summary calls/final assembly; confirm-ot writes
+a new snapshot from the same sources, with a new run ID linked to its parent, while
+preserving the source snapshot. Confirmed outside windows count as OT; main rows
+are NORMAL, gaps remain excluded, and replay does not repeat the question. Explicit
+OT hours can be recorded even without source activity. Single-start requests and
+v1-v6 snapshots keep their original behavior.
+
+Allocations split at NORMAL/OT boundaries, preserving shared descriptions. Short
+allocations merge only with a preceding piece of the same work type. The writer
+rejects unconfirmed/misclassified OT; Markdown and collection metadata include
+separate NORMAL/OT totals. Proven merge actions attached to a closing main commit
+do not cause a false OT question.
+
+Validation: the full suite passed 635 tests; all 26 OT tests also passed after the
+final metadata checks, including synthetic measured summary/assembly. Both Codex
+skills passed quick_validate and git diff --check passed. No live sources or model
+benchmark were run, no timesheet was published, and this change is not committed.
+
+
+## 2026-10-09 — Approved one-hour OT default
+
+User revision: default OT to one hour ending at the commit, considered approved
+unless the user requests an edit. Codex range requests now use snapshot v8 with
+policy default_minutes=60, end_basis=commit_minute_floor and standing_user_rule
+approval. No confirmation reply or waiting period is required for new defaults.
+Default windows are clipped to the selected date and outside main, then united
+to avoid duplicate minutes across overlapping/simultaneous commits. PR/Calendar
+alone do not invent a commit hour; Calendar attendance remains unconfirmed.
+
+Requested edits or no OT use confirm-ot against frozen evidence, preserving the
+source and recording user_override separately from default_commit_hour. Closing
+commits/merge actions with seconds in the ending minute preserve their evidence.
+Default hours remain estimates and are identified as such in Markdown and prepare
+output. V1-v7 replay their prior semantics, including manual pending v7 decisions.
+
+Validation: full suite passed 651 tests; 42 OT tests passed again after display
+updates. Both Codex skills passed quick_validate and git diff --check passed.
+No live collection, model benchmark, publication, commit or push was performed.
+
+
+## 2026-10-09 — English work-log descriptions
+
+Both compact and legacy summary prompts now request concise English descriptions,
+translating non-English evidence while preserving ticket keys and proper names.
+The Codex skills and root skill specify English for NORMAL and OT descriptions;
+conversation can remain in the user's language. Deterministic fallback uses English
+source-count templates or scheduled Calendar wording rather than copying or guessing
+translations of titles. Calendar attendance stays unconfirmed. Original commit,
+PR and Calendar evidence is preserved; existing saved logs are not rewritten.
+
+Validation: 655 tests passed, including prompt checks for both summary strategies,
+English fallback from Vietnamese/Chinese/unaccented input, source preservation,
+PR deduplication and idempotent assembly. Both Codex skills passed quick_validate;
+git diff --check passed. No live model benchmark, publication, commit or push ran.

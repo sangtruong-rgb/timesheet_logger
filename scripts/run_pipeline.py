@@ -139,7 +139,7 @@ def save_activity_draft(date_str, normalized, collection, output_dir, storage_re
 def _run():
     parser = argparse.ArgumentParser(description="Run the end-to-end timesheet pipeline.")
     parser.add_argument("--date", type=str, default=None, help="Target date YYYY-MM-DD (default: today)")
-    parser.add_argument("--phase", choices=("run", "prepare", "assemble"), default="run")
+    parser.add_argument("--phase", choices=("run", "prepare", "confirm-ot", "assemble"), default="run")
     parser.add_argument("--snapshot", help="Immutable snapshot output for prepare, input for assemble")
     parser.add_argument("--max-ai-input-bytes", type=int, default=12000)
     parser.add_argument("--repos", nargs="+", default=None, help="Repositories shared by Git and PR collection")
@@ -148,6 +148,10 @@ def _run():
     parser.add_argument("--work-start", help="Confirmed start HH:MM for the target day; selects commit_intervals")
     parser.add_argument("--work-end", help="Optional confirmed end HH:MM (or 24:00); requires --work-start")
     parser.add_argument('--work-windows', help='Confirmed daily intervals, e.g. "8:00-12:00, 1h30-4:00"; replaces profile breaks')
+    parser.add_argument('--review-ot', action='store_true', help='Apply approved 60-minute OT windows ending at outside-main commits')
+    parser.add_argument('--ot-windows', help='User-confirmed OT intervals; only with --phase confirm-ot')
+    parser.add_argument('--decline-ot', action='store_true', help='User declined OT; only with --phase confirm-ot')
+    parser.add_argument('--resolved-snapshot', help='New snapshot path for the OT answer; original evidence is preserved')
     add_settings_arguments(parser)
     add_calendar_arguments(parser)
     parser.add_argument("--calendar-fixture", type=str, default=None, help="Explicit Calendar demo/test fixture")
@@ -160,6 +164,34 @@ def _run():
     parser.add_argument("--token-csv-path", help="Isolated token output; default from profile/environment/repo root")
     parser.add_argument("--claude-dir", help="Exact session lookup root (no global usage aggregation)")
     args = parser.parse_args()
+    if args.phase == 'confirm-ot':
+        if (not args.snapshot or not args.resolved_snapshot or args.review_ot
+                or args.work_windows is not None or args.work_start is not None or args.work_end is not None
+                or args.ai_output or args.usage_run_manifest):
+            parser.error('confirm-ot requires source/new snapshot paths and one OT decision, without fresh hours or AI output')
+        try:
+            check_ai_export(args, args.resolved_snapshot)
+            if args.export_ai_input:
+                check_ai_export(args, args.export_ai_input)
+            from overtime import resolve_snapshot
+            from work_windows import parse_work_windows
+            if args.date is not None:
+                from activity_snapshot import read_snapshot
+                if args.date != read_snapshot(args.snapshot)['normalized']['date']:
+                    raise ValueError('Requested date conflicts with the frozen snapshot')
+            snapshot = resolve_snapshot(args.snapshot, args.resolved_snapshot,
+                                        windows=parse_work_windows(args.ot_windows) if args.ot_windows is not None else None,
+                                        decline=args.decline_ot, ai_export=args.export_ai_input)
+            print(f" OT RESOLVED: {snapshot['normalized']['overtime_review']['status']}")
+            print(f" PREPARED immutable snapshot: {args.resolved_snapshot}; Run ID: {snapshot['run_id']}")
+            return 0
+        except (ValueError, OSError) as exc:
+            print(f' OT CONFIRMATION BLOCKED: {exc}', file=sys.stderr)
+            return 2
+    if args.ot_windows is not None or args.decline_ot or args.resolved_snapshot:
+        parser.error('OT decision arguments require --phase confirm-ot')
+    if args.review_ot and (args.phase == 'assemble' or args.work_windows is None):
+        parser.error('--review-ot requires main --work-windows during prepare/run')
     if args.export_ai_input:
         try:
             check_ai_export(args, args.export_ai_input)
@@ -283,6 +315,10 @@ def _run():
             normalized["block_policy"] = block_policy
         if confirmation is not None:
             normalized["work_confirmation"] = confirmation
+        if args.review_ot:
+            from overtime import initial_review
+            normalized['overtime_review'] = initial_review(normalized)
+            collection['overtime_review'] = normalized['overtime_review']
     except ActivityNormalizationError as exc:
         raw = {"date": date_str, "timezone": selected["timezone_name"], "commits": commits_data,
                "pull_requests": pr_result["items"], "calendar": cal_result["items"]}
@@ -331,7 +367,17 @@ def assemble_activity(args, date_str, normalized, collection, output_dir, *, fro
             snapshot = save_snapshot(snapshot_path, normalized, collection, blocks, unassigned_activity, ai_payload, ai_export)
             print(f" PREPARED immutable snapshot: {snapshot_path}")
             print(f" Run ID: {snapshot['run_id']}; no final timesheet or token file written.")
+            if 'overtime_review' in normalized:
+                from overtime import confirmation_question
+                question = confirmation_question(normalized)
+                if question:
+                    print(f' OT_CONFIRMATION_REQUIRED: {question}')
+                elif normalized['overtime_review']['status'] == 'defaulted':
+                    hours = ', '.join(f"{item['start']}–{item['end']}" for item in normalized['overtime_review']['confirmed_windows'])
+                    print(f' OT_DEFAULT_APPLIED: {hours}; estimated, approved by the standing 60-minute commit rule; no reply required')
             return 0
+        from overtime import require_resolved
+        require_resolved(normalized)
         from summary_request import commit_group_mapping
         entries = build_entries(blocks, load_ai_judgments(args.ai_output),
                                 summary_groups=commit_group_mapping(ai_payload['blocks']))

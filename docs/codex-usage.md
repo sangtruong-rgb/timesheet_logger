@@ -62,6 +62,12 @@ python3 scripts/run_pipeline.py --phase assemble \
   --token-csv-path "$RUN/token-usage.csv" --output-dir "$RUN/timesheets"
 ```
 
+Work-log descriptions are generated in English for NORMAL and OT entries. Both
+summary strategies translate non-English evidence while retaining ticket keys
+and proper names. Without AI, English templates describe the available evidence
+or scheduled calendar activity; original titles/messages remain in `sources`.
+Calendar attendance remains unconfirmed. Existing saved logs are not rewritten.
+
 The default `compact` runner sends a text dictionary and summary jobs. Payload v3
 uses one job for the pieces of a commit allocation split by lunch/Calendar, combining
 their PR titles into shared context. Each piece receives the same topic description
@@ -77,7 +83,9 @@ timestamp assignment. This keeps a start-minute commit from separating otherwise
 shared descriptions. V1-v3 snapshots reproduce their previous allocation behavior.
 New pipeline snapshots use v5 to freeze the configured work schedule as well.
 explicit `--work-windows` requests use v6 to freeze all confirmed daily windows.
-V1–v5 and their recorded usage remain readable. See [schedule policy](work-schedule.md).
+V7 freezes OT observations and the daily decision; a pending decision blocks the
+summary invocation before it writes artifacts or calls a model. V8 records the approved commit-hour default and allows summary without a reply;
+v7 pending rules remain unchanged. V1–v7 and their recorded usage remain readable. See [schedule policy](work-schedule.md).
 
 It uses a fresh, ephemeral, read-only CLI invocation without user config/rules,
 from the isolated run directory. A narrow `model_instructions_file` replaces coding

@@ -92,6 +92,10 @@ def render_markdown(date_str: str, items: List[Dict[str, Any]], collection_statu
         lines[4:4] = ["> REVIEW REQUIRED: development boundaries were inferred from activity clusters; confirm them before publishing.", ""]
     if has_estimates:
         lines[4:4] = ["> Estimated intervals are proposals based on activity timestamps, not measured work time.", ""]
+    has_default_ot = any(item.get('overtime_confirmation', {}).get('approval_basis') == 'default_commit_hour'
+                         for item in items)
+    if has_default_ot:
+        lines[4:4] = ["> OT uses the user-approved default: 60 minutes ending at each outside-main commit. Main coverage is excluded and overlapping hours are counted once. Default OT remains estimated; requested edits override it.", ""]
     schedules = []
     for item in items:
         if 'work_schedule' in item:
@@ -101,12 +105,14 @@ def render_markdown(date_str: str, items: List[Dict[str, Any]], collection_statu
                 schedules.append(schedule)
     confirmations = []
     for item in items:
-        windows = item.get('work_confirmation', {}).get('windows')
+        windows = item.get('main_work_windows', item.get('work_confirmation', {}).get('windows'))
         if windows is not None and windows not in confirmations:
             confirmations.append(windows)
     for windows in confirmations:
         hours = ', '.join(f"{w['start']}–{w['end']}" for w in windows)
-        lines[4:4] = [f"> Confirmed daily work windows: {hours}. Only these windows contribute time; gaps are excluded. They replace profile hours and breaks for this date.", ""]
+        scope = ('These are NORMAL windows; OT is counted only in separately confirmed intervals.'
+                 if any('work_type' in item for item in items) else 'Only these windows contribute time; gaps are excluded.')
+        lines[4:4] = [f"> Confirmed daily work windows: {hours}. {scope} They replace profile hours and breaks for this date.", ""]
     for schedule in schedules if not confirmations else []:
         breaks = ', '.join(f"{b['start']}–{b['end']}" for b in schedule['breaks']) or 'none'
         overtime = ', '.join(f"{b['start']}–{b['end']}" for b in schedule['overtime_windows']) or 'none'
@@ -134,6 +140,8 @@ def render_markdown(date_str: str, items: List[Dict[str, Any]], collection_statu
         elif basis == "estimated":
             estimated_minutes += dur
         duration_text = f"{dur}m" + (f" ({basis})" if basis in ("scheduled", "estimated") else "")
+        if 'work_type' in it:
+            duration_text += f" — {it['work_type']}"
         if it.get("calendar_overlap"):
             overlap_minutes += dur
             duration_text += " — attendance review required"
@@ -162,6 +170,12 @@ def render_markdown(date_str: str, items: List[Dict[str, Any]], collection_statu
     lines.append("")
     total_label = "Total Proposed Time" if has_estimates or has_schedule or has_overlap or unassigned_activity else "Total Tracked Time"
     lines.append(f"**{total_label}:** {total_minutes} mins ({hours}h {mins:02d}m)")
+    if any('work_type' in item for item in items):
+        totals = {kind: sum(item['entry']['duration_minutes'] for item in items if item.get('work_type') == kind)
+                  for kind in ('NORMAL', 'OT')}
+        ot_label = 'approved' if any('policy' in item.get('overtime_confirmation', {}) for item in items) else 'confirmed'
+        lines.append(f"NORMAL: {totals['NORMAL']} mins; OT ({ot_label}): {totals['OT']} mins; "
+                     f"unclassified: {total_minutes - sum(totals.values())} mins.")
     if any(item.get("time_basis") in ("scheduled", "estimated") for item in items):
         lines.append(f"Scheduled Calendar: {scheduled_minutes} mins; estimated development: {estimated_minutes} mins; "
                      f"manual/unclassified: {total_minutes - scheduled_minutes - estimated_minutes} mins.")
@@ -281,6 +295,11 @@ def reconcile_daily_entries(existing, incoming, target_date, collection_status):
 
     for item in incoming:
         start, end = entry_interval(item, target_date)
+        try:
+            from overtime import validate_classification
+            validate_classification(item)
+        except ValueError as exc:
+            raise TimesheetReconciliationError('Incoming work classification is invalid') from exc
         metadata = item.get("collection", {})
         if not isinstance(metadata, dict) or metadata.get("status", collection_status) != collection_status:
             raise TimesheetReconciliationError("Incoming row collection status does not match the successful snapshot")
@@ -458,6 +477,12 @@ def _save_timesheet(entries, output_dir="data/timesheets", *, target_date, colle
             "calendar_context_count": len(context), "calendar_context_file": context_file.name if write_context else None,
             "unassigned_activity_count": len(unassigned), "activity_review_file": review_file.name if write_review else None,
             "review": {"status": "required" if unassigned or any(e.get("calendar_overlap") or e.get("time_basis") in ("scheduled", "estimated") for e in merged) else "none"}}
+        if any('work_type' in item for item in merged):
+            manifest['work_type_totals'] = {
+                kind: sum(item['entry']['duration_minutes'] for item in merged if item.get('work_type') == kind)
+                for kind in ('NORMAL', 'OT')}
+            manifest['work_type_totals']['unclassified'] = sum(
+                item['entry']['duration_minutes'] for item in merged if 'work_type' not in item)
         contents[dir_path / f"{target_date}.collection.json"] = json.dumps(manifest, indent=2)
     if token_records:
         try:
