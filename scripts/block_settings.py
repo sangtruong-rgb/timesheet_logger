@@ -7,6 +7,7 @@ LEGACY_STRATEGY = "legacy_workday_windows"
 CLUSTER_STRATEGY = "activity_clusters"
 COMMIT_STRATEGY = "commit_intervals"
 SHORT_COMMIT_MERGE_MINUTES = 20
+DEVELOPMENT_EVIDENCE_POLICY = "commit_or_pr_required_v1"
 DEFAULT_CLUSTER_POLICY = {
     "strategy": CLUSTER_STRATEGY,
     "inactivity_gap_minutes": 45,

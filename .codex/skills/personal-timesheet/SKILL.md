@@ -26,8 +26,10 @@ confirmed morning start for today in the configured timezone. Use
 `--work-day-start HH:MM`: Python creates start–12:00 and 13:30–18:30 as the
 NORMAL windows and enables the approved commit-hour OT rule. For example, 08:30
 means 08:30–12:00 plus five afternoon hours, 13:30–18:30. Show these expanded
-windows in the preview. The full approved windows, including the closing tail,
-are estimated proposals even without later commits; they are not measured work.
+windows in the preview. Development blocks require commit or PR evidence; leave
+empty windows and unsupported closing tails blank. Never add generic development
+or focus-time placeholders. Calendar rows remain separate; attendance confirmation
+is independent. Supported development durations are estimates, not measured work.
 A supplied date overrides today. Collect live sources, run the measured Codex
 summary when eligible, and assemble in a unique audit directory. No Gradion write
 is authorized by shorthand. Report measured summary usage, or SKIPPED when no AI
@@ -39,8 +41,8 @@ it to 08:00–12:00 and 13:30–16:00. Colon and `h` clocks and AM/PM are accept
 Unpadded low hours may mean afternoon when needed to follow the prior boundary;
 padded HH:MM is always 24-hour time. Explicit windows replace profile hours and
 breaks for this date; gaps contribute no time, and Calendar rows are clipped to
-the windows with excluded evidence retained for review. The last end is confirmed,
-so include the closing tail. Show the canonical windows in the preview. Do not
+the windows with excluded evidence retained for review. The last end bounds
+allocation; include a closing tail only with commit or PR evidence. Show the canonical windows in the preview. Do not
 change the profile. Invalid windows fail before collecting sources; ask only for
 clarification of the rejected input. The dedicated `$personal-timesheet-windows`
 skill supports the same workflow.

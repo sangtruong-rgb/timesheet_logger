@@ -105,13 +105,13 @@ class TestWindowPipeline(unittest.TestCase):
     def test_v6_freezes_windows_and_replays_without_profile_or_collection(self):
         self.assertEqual(self.prepare(), (0, 3))
         snapshot = read_snapshot(self.snapshot)
-        self.assertEqual(snapshot['schema_version'], 9)
+        self.assertEqual(snapshot['schema_version'], 10)
         self.assertEqual(snapshot['normalized']['work_confirmation']['windows'], WINDOWS)
         self.profile.write_text('{broken')
         self.assertEqual(self.invoke('--phase', 'assemble', '--snapshot', str(self.snapshot)), (0, 0))
         path = self.output / f'{DATE}.json'
         rows = json.loads(path.read_text())
-        self.assertEqual(sum(r['entry']['duration_minutes'] for r in rows), 390)
+        self.assertEqual(sum(r['entry']['duration_minutes'] for r in rows), 120)
         before = path.read_bytes()
         self.assertEqual(self.invoke('--phase', 'assemble', '--snapshot', str(self.snapshot)), (0, 0))
         self.assertEqual(path.read_bytes(), before)
@@ -165,7 +165,7 @@ class TestWindowPipeline(unittest.TestCase):
                                      '--token-csv-path', str(csv_path)), (0, 0))
         manifest = json.loads((self.output / f'{DATE}.collection.json').read_text())
         self.assertEqual(manifest['token_usage']['total_tokens'], 165)
-        self.assertEqual(sum(b['duration_minutes'] for b in read_snapshot(self.snapshot)['blocks']), 390)
+        self.assertEqual(sum(b['duration_minutes'] for b in read_snapshot(self.snapshot)['blocks']), 120)
 
 
 if __name__ == '__main__':

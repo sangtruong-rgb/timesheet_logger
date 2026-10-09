@@ -329,6 +329,8 @@ def _run():
             normalized["work_confirmation"] = confirmation
             from commit_groups import GROUPING_POLICY, enrich_commit_prs
             normalized['commit_grouping'] = GROUPING_POLICY
+            from block_settings import DEVELOPMENT_EVIDENCE_POLICY
+            normalized['development_evidence_policy'] = DEVELOPMENT_EVIDENCE_POLICY
             if incomplete or demo:
                 # Fixtures and failed collections must never trigger additional live lookups.
                 for commit in normalized['commits']:

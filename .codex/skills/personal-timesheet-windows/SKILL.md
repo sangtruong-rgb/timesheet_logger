@@ -48,8 +48,9 @@ pending manual decision. Use the same frozen evidence and a new snapshot for an
 override. Gaps between main and confirmed OT windows
 are excluded, and Calendar rows are clipped to their union. Preserve excluded
 activity for review; scheduled attendance
-remains unconfirmed. The final end is supplied by the user, so include the closing
-tail as an estimated allocation. Group adjacent pieces only by a verified common PR or unique ticket after an
+remains unconfirmed. Confirmed hours alone do not create development entries:
+leave windows and closing tails without commit or PR evidence blank, without
+generic development/focus placeholders. Group adjacent pieces only by a verified common PR or unique ticket after an
 empty successful PR lookup, within the same work type. Do not merge by duration. All windows are frozen in
 the snapshot; changed main hours require a new prepare run. Requested OT edits use
 the dedicated frozen decision phase. Do not change the profile or publish from shorthand.

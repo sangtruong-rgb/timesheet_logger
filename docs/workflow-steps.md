@@ -88,6 +88,11 @@ fails, `show usage` can still show verified usage from the attempt receipt. Do n
 erase its `codex/` directory to retry: it contains cost and diagnostic evidence.
 The existing runner rejects reuse of that directory.
 
+New prepare runs omit development blocks without commit or PR evidence, including
+empty confirmed windows and unsupported time after the last commit. Calendar
+entries remain separate. This rule is frozen in snapshot v10; use a fresh run
+directory to apply it, since existing snapshots retain their historical output.
+
 New commit-based runs use payload v6: the same AI call groups related work sessions
 and writes a short outcome-focused description per session. Related implementation,
 fixes, tests, reports and integration of one workflow can group across feature/PR

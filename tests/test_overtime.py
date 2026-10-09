@@ -342,7 +342,7 @@ class TestDefaultOTPipeline(unittest.TestCase):
     def test_v8_default_is_approved_and_assembles_without_question_or_collection(self):
         self.assertEqual(self.prepare(), (0, 3))
         frozen = read_snapshot(self.snapshot)
-        self.assertEqual(frozen['schema_version'], 9)
+        self.assertEqual(frozen['schema_version'], 10)
         self.assertEqual(frozen['normalized']['overtime_review']['status'], 'defaulted')
         self.profile.write_text('{invalid')
         self.assertEqual(self.invoke('--phase', 'assemble', '--snapshot', str(self.snapshot)), (0, 0))
@@ -373,7 +373,7 @@ class TestDefaultOTPipeline(unittest.TestCase):
                          [{'start': '00:00', 'end': '00:50'}])
         self.assertEqual(self.invoke('--phase', 'assemble', '--snapshot', str(self.snapshot)), (0, 0))
         manifest = json.loads((self.output / f'{DATE}.collection.json').read_text())
-        self.assertEqual(manifest['work_type_totals'], {'NORMAL': 390, 'OT': 50, 'unclassified': 0})
+        self.assertEqual(manifest['work_type_totals'], {'NORMAL': 0, 'OT': 50, 'unclassified': 0})
         path = self.output / f'{DATE}.json'
         before = path.read_bytes()
         self.assertEqual(self.invoke('--phase', 'assemble', '--snapshot', str(self.snapshot)), (0, 0))
@@ -432,7 +432,7 @@ class TestOTPipeline(unittest.TestCase):
 
     def test_pending_stops_assembly_and_model_call(self):
         self.assertEqual(self.prepare(), (0, 3))
-        self.assertEqual(read_snapshot(self.snapshot)['schema_version'], 9)
+        self.assertEqual(read_snapshot(self.snapshot)['schema_version'], 10)
         self.assertEqual(self.invoke('--phase', 'assemble', '--snapshot', str(self.snapshot)), (2, 0))
         self.assertFalse((self.output / f'{DATE}.json').exists())
         with patch('run_codex_summary.subprocess.run') as call, self.assertRaisesRegex(ValueError, 'pending'):
@@ -463,7 +463,7 @@ class TestOTPipeline(unittest.TestCase):
         path = self.root / 'resolved.json'
         self.assertEqual(self.invoke('--phase', 'assemble', '--snapshot', str(path)), (0, 0))
         rows = json.loads((self.output / f'{DATE}.json').read_text())
-        self.assertEqual(sum(r['entry']['duration_minutes'] for r in rows), 390)
+        self.assertEqual(sum(r['entry']['duration_minutes'] for r in rows), 0)
         self.assertTrue(all(r['work_type'] == 'NORMAL' for r in rows))
 
     def test_invalid_decisions_preserve_source_and_output(self):
@@ -486,7 +486,10 @@ class TestOTPipeline(unittest.TestCase):
             resolve_snapshot(self.root / 'resolved.json', self.root / 'again.json', decline=True)
 
     def test_rehashed_review_change_and_downgrade_are_rejected(self):
-        self.assertEqual(self.prepare(), (0, 3))
+        self.activities = [commit('10:00', 'normal'), commit('18:00', 'late')]
+        with patch('overtime.initial_review', side_effect=lambda value: initial_review(value, default_policy=False)):
+            self.assertEqual(self.invoke('--phase', 'prepare', '--snapshot', str(self.snapshot),
+                                         '--work-windows', '08:00-12:00, 13:30-16:00', '--review-ot'), (0, 3))
         original = read_snapshot(self.snapshot)
         for edit in ('candidate', 'version', 'row'):
             frozen = copy.deepcopy(original)

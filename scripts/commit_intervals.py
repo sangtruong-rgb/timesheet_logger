@@ -15,7 +15,8 @@ import datetime
 import re
 
 from block_identity import BlockIdentityError
-from block_settings import COMMIT_STRATEGY, LEGACY_STRATEGY, SHORT_COMMIT_MERGE_MINUTES
+from block_settings import (COMMIT_STRATEGY, LEGACY_STRATEGY, SHORT_COMMIT_MERGE_MINUTES,
+                            DEVELOPMENT_EVIDENCE_POLICY)
 
 
 def work_confirmation(date, start, end=None, *, windows=None):
@@ -57,6 +58,9 @@ def build_commit_intervals(model, date, tz, unassigned, *, merge_short_commits=T
     from build_time_blocks import build_time_blocks, parse_dt, calculate_minutes
     from get_pr_activity import deduplicate_prs
     from commit_groups import SUPPORTED_GROUPING_POLICIES
+    evidence_policy = model.get('development_evidence_policy')
+    if evidence_policy is not None and evidence_policy != DEVELOPMENT_EVIDENCE_POLICY:
+        raise BlockIdentityError('Unsupported development evidence policy')
     grouping = model.get('commit_grouping')
     if grouping is not None and grouping not in SUPPORTED_GROUPING_POLICIES:
         raise BlockIdentityError('Unsupported commit grouping policy')
@@ -286,6 +290,11 @@ def build_commit_intervals(model, date, tz, unassigned, *, merge_short_commits=T
         if 'work_schedule' in model:
             from copy import deepcopy
             block['work_schedule'] = deepcopy(schedule)
+    if evidence_policy:
+        # Assign evidence first: PR-only work and a closing commit's split pieces
+        # remain supported, while empty windows/tails must not become work logs.
+        blocks = [block for block in blocks if block['block_type'] != 'development'
+                  or block['commits'] or block['prs']]
     if grouping:
         from commit_groups import group_adjacent_blocks
         blocks = group_adjacent_blocks(blocks, policy=grouping)
