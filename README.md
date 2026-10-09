@@ -54,8 +54,9 @@ For a short request with your confirmed start time:
 
 A morning start alone now creates NORMAL windows from that start to 12:00 and
 13:30–18:30 (five afternoon hours), with approved estimated OT outside them.
-For example, `08:30` means 08:30–12:00 and 13:30–18:30. The full windows are
-proposals, including the closing tail even when there are no later commits.
+For example, `08:30` means 08:30–12:00 and 13:30–18:30. Development blocks
+require commit or PR evidence; empty windows and unsupported closing tails stay blank.
+Calendar entries remain separate, with attendance unconfirmed unless declared.
 The skill uses Python's `--work-day-start HH:MM`; it does not compute the windows
 itself. A start at or after noon needs explicit windows.
 
@@ -222,9 +223,10 @@ clock overrides. Changed hours require a new snapshot.
   original event timestamp and record the association; never extend confirmed hours.
   Events outside available intervals remain in review. Commits outside confirmed
   hours do not extend development time. A commit exactly at start adds no time.
-- With no commits and no confirmed end, generate only Calendar rows. With both
-  confirmed hours, allocate that window minus lunch/Calendar, using generic text
-  when there is no activity. A tail after the last commit does not borrow its task.
+- Development blocks require an assigned commit or PR. Confirmed hours alone do
+  not create generic development/focus entries; unsupported windows and closing
+  tails stay blank. Calendar rows remain independently eligible. New snapshots
+  freeze this rule in schema v10; older snapshots replay their original behavior.
 
 Example: start 09:00, commits 10:10 / 11:40 / 14:10 / 16:00, no Calendar:
 09:00–10:10 (70m), 10:10–11:40 (90m), 11:40–12:00 (20m),

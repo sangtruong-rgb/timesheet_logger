@@ -345,7 +345,7 @@ class TestPipelineCommitIntervals(unittest.TestCase):
         self.profile.write_text('{}')
         self.assertEqual(self.invoke("--phase", "assemble", "--snapshot", str(self.snapshot)), (0, 0))
         rows = json.loads((self.output / f"{DATE}.json").read_text())
-        self.assertEqual(sum(r["entry"]["duration_minutes"] for r in rows), 150)
+        self.assertEqual(sum(r["entry"]["duration_minutes"] for r in rows), 90)
         before = (self.output / f"{DATE}.json").read_bytes()
         self.assertEqual(self.invoke("--phase", "assemble", "--snapshot", str(self.snapshot)), (0, 0))
         self.assertEqual((self.output / f"{DATE}.json").read_bytes(), before)
@@ -365,7 +365,7 @@ class TestPipelineCommitIntervals(unittest.TestCase):
         self.activities = [commit('10:00', 'a'), commit('10:10', 'b'), commit('10:25', 'c')]
         self.assertEqual(self.invoke('--phase', 'prepare', '--snapshot', str(self.snapshot), '--work-start', '09:00'), (0, 3))
         frozen = read_snapshot(self.snapshot)
-        self.assertEqual(frozen['schema_version'], 9)
+        self.assertEqual(frozen['schema_version'], 10)
         self.assertEqual(intervals(frozen['blocks']), [('09:00', '10:00', 60), ('10:00', '10:10', 10), ('10:10', '10:25', 15)])
         self.assertEqual(len(frozen['ai_input']['summary_request']['jobs']), 3)
         self.assertEqual(frozen['collection']['commit_pr_associations']['unknown'], 3)

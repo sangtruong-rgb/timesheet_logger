@@ -157,7 +157,7 @@ class TestSchedulePipeline(unittest.TestCase):
     def test_prepare_freezes_schedule_and_assemble_ignores_changed_profile(self):
         self.assertEqual(self.prepare({'breaks': [{'start': '12:30', 'end': '13:00'}]}), (0, 3))
         frozen = read_snapshot(self.snapshot)
-        self.assertEqual(frozen['schema_version'], 9)
+        self.assertEqual(frozen['schema_version'], 10)
         self.assertEqual(intervals(frozen['blocks']), [('08:30', '12:30', 240), ('13:00', '14:30', 90)])
         self.profile.write_text('{invalid config')
         self.assertEqual(self.invoke('--phase', 'assemble', '--snapshot', str(self.snapshot)), (0, 0))

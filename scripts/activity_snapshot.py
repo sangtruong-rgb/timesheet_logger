@@ -21,7 +21,7 @@ def read_snapshot(path):
     try:
         snapshot = json.loads(Path(path).read_text(encoding="utf-8"))
         if (not isinstance(snapshot, dict) or type(snapshot.get('schema_version')) is not int
-                or snapshot['schema_version'] not in (1, 2, 3, 4, 5, 6, 7, 8, 9)):
+                or snapshot['schema_version'] not in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10)):
             raise ValueError("Unsupported snapshot")
         expected = snapshot["fingerprint"]
         body = {k: v for k, v in snapshot.items() if k != "fingerprint"}
@@ -39,9 +39,14 @@ def read_snapshot(path):
         if legacy and (snapshot['schema_version'] >= 8) != ('policy' in snapshot['normalized'].get('overtime_review', {})):
             raise ValueError('Snapshot default OT policy requires schema v8')
         from commit_groups import SUPPORTED_GROUPING_POLICIES
-        if ((snapshot['schema_version'] == 9) != ('commit_grouping' in snapshot['normalized'])
+        if ((snapshot['schema_version'] >= 9) != ('commit_grouping' in snapshot['normalized'])
                 or (not legacy and snapshot['normalized']['commit_grouping'] not in SUPPORTED_GROUPING_POLICIES)):
             raise ValueError('Snapshot commit grouping requires schema v9')
+        from block_settings import DEVELOPMENT_EVIDENCE_POLICY
+        if ((snapshot['schema_version'] >= 10) != ('development_evidence_policy' in snapshot['normalized'])
+                or (snapshot['schema_version'] >= 10 and snapshot['normalized']['development_evidence_policy']
+                    != DEVELOPMENT_EVIDENCE_POLICY)):
+            raise ValueError('Snapshot development evidence policy requires schema v10')
         if ('overtime_review' in snapshot['normalized'] and snapshot['collection'].get('overtime_review')
                 != snapshot['normalized']['overtime_review']):
             raise ValueError('Snapshot OT decision conflicts with its collection metadata')
@@ -69,8 +74,9 @@ def read_snapshot(path):
 
 def save_snapshot(path, normalized, collection, blocks, unassigned, ai_input, ai_export=None):
     path = Path(path)
-    # v9 freezes PR/ticket grouping; v8 and older retain their allocation rules.
-    version = (9 if 'commit_grouping' in normalized else
+    # v10 omits unsupported development; older snapshots retain their allocations.
+    version = (10 if 'development_evidence_policy' in normalized else
+               9 if 'commit_grouping' in normalized else
                8 if 'policy' in normalized.get('overtime_review', {}) else
                7 if 'overtime_review' in normalized else
                6 if 'windows' in normalized.get('work_confirmation', {}) else

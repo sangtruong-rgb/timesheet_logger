@@ -40,18 +40,18 @@ class TestDefaultWorkDayPipeline(unittest.TestCase):
     def rows(self):
         return json.loads((self.output / f'{DATE}.json').read_text())
 
-    def test_only_prestart_commits_now_generate_ot_and_keep_full_normal_day(self):
+    def test_only_prestart_commits_generate_ot_without_normal_placeholders(self):
         self.activities = [commit('07:30', 'early')]
         profile_before = self.profile.read_bytes()
         self.assertEqual(self.prepare(), (0, 3))
         snapshot = read_snapshot(self.snapshot)
-        self.assertEqual(snapshot['schema_version'], 9)
+        self.assertEqual(snapshot['schema_version'], 10)
         self.assertEqual(snapshot['normalized']['work_confirmation']['windows'], WINDOWS)
         self.assertEqual(snapshot['normalized']['overtime_review']['confirmed_windows'],
                          [{'start': '06:30', 'end': '07:30'}])
         self.assertEqual(self.invoke('--phase', 'assemble', '--snapshot', str(self.snapshot)), (0, 0))
         rows = self.rows()
-        self.assertEqual(sum(r['entry']['duration_minutes'] for r in rows if r['work_type'] == 'NORMAL'), 510)
+        self.assertEqual(sum(r['entry']['duration_minutes'] for r in rows if r['work_type'] == 'NORMAL'), 0)
         self.assertEqual(sum(r['entry']['duration_minutes'] for r in rows if r['work_type'] == 'OT'), 60)
         self.assertEqual({c['hash'] for r in rows for c in r['sources']['commits']}, {'early'})
         self.assertEqual(snapshot['unassigned_activity'], [])
@@ -59,7 +59,7 @@ class TestDefaultWorkDayPipeline(unittest.TestCase):
         self.assertTrue(snapshot['ai_input']['blocks'])
         self.assertEqual(self.profile.read_bytes(), profile_before)
 
-    def test_no_commits_still_preview_approved_hours_with_no_ai_call(self):
+    def test_no_commits_leave_approved_hours_empty_with_no_ai_call(self):
         self.activities = []
         self.assertEqual(self.prepare(), (0, 3))
         snapshot = read_snapshot(self.snapshot)
@@ -67,9 +67,7 @@ class TestDefaultWorkDayPipeline(unittest.TestCase):
         self.assertEqual(snapshot['ai_input']['blocks'], [])
         self.assertEqual(self.invoke('--phase', 'assemble', '--snapshot', str(self.snapshot)), (0, 0))
         rows = self.rows()
-        self.assertEqual([(r['entry']['start'], r['entry']['end'], r['entry']['duration_minutes']) for r in rows],
-                         [('08:30', '12:00', 210), ('13:30', '18:30', 300)])
-        self.assertTrue(all(r['time_basis'] == 'estimated' and r['work_type'] == 'NORMAL' for r in rows))
+        self.assertEqual(rows, [])
         manifest = json.loads((self.output / f'{DATE}.collection.json').read_text())
         self.assertEqual(manifest['token_usage']['status'], 'unknown')
 
@@ -95,7 +93,7 @@ class TestDefaultWorkDayPipeline(unittest.TestCase):
         self.assertEqual(self.prepare(), (0, 3))
         snapshot = read_snapshot(self.snapshot)
         self.assertEqual(snapshot['normalized']['overtime_review']['confirmed_windows'], [])
-        self.assertEqual(sum(b['duration_minutes'] for b in snapshot['blocks']), 510)
+        self.assertEqual(snapshot['blocks'], [])
 
     def test_afternoon_end_commit_is_normal_not_ot(self):
         self.activities = [commit('18:30', 'closing')]

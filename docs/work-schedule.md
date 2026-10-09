@@ -90,12 +90,12 @@ clocks and nonexistent local DST boundaries fail before source collection.
   Calendar evidence is retained for review without adding time; attendance stays
   unconfirmed. Commits/PRs outside the windows are review-only. Commits exactly
   at a window end can close the work leading to that boundary.
-- The last supplied end is confirmed: include the remaining tail even after the
-  final commit, using estimated duration. PR/ticket grouping happens after
+- The last supplied end bounds allocation; retain a closing tail only when it
+  has commit or PR evidence. Empty development windows stay blank. PR/ticket grouping happens after
   gaps/Calendar exclusions and never absorbs the confirmed-end tail.
-- Snapshots with explicit windows use **v6** and freeze the canonical windows
+- New snapshots use **v10** and freeze both the evidence requirement and canonical windows
   inside `work_confirmation`. Assembly cannot change them, does not collect again,
-  and replays them even if the profile changes. V1–v5 retain their prior behavior.
+  and replays them even if the profile changes. V1–v9 retain their prior behavior.
 
 ## OT outside the main windows
 
@@ -175,8 +175,10 @@ This expands the user-approved default to 08:30–12:00 and 13:30–18:30, with 
 hours in the afternoon. The fixed lunch gap replaces profile breaks for this date;
 profile settings are preserved. `--work-day-start` automatically enables default
 OT for commits outside the two NORMAL windows, including early-morning commits.
-Main windows and OT policy are frozen in snapshot v8. Full main coverage, including
-the 18:30 closing tail without a commit, remains an estimate, not measured work.
+Main windows, OT policy and the development evidence requirement are frozen in
+snapshot v10. Only development intervals with commit or PR evidence are proposed;
+empty windows and unsupported closing tails remain blank. Calendar entries remain
+separate. Proposed development duration is estimated, not measured work.
 
 ```bash
 .venv/bin/python scripts/run_pipeline.py --phase prepare \
