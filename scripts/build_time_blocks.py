@@ -128,6 +128,12 @@ def build_time_blocks(normalized_data: Dict[str, Any], *, unassigned_activity=No
                       short_commit_merge_minutes=SHORT_COMMIT_MERGE_MINUTES,
                       commit_allocation_version=2) -> List[Dict[str, Any]]:
     """Build timed proposals; callers persisting evidence must collect unassigned_activity."""
+    if 'overtime_review' in normalized_data:
+        from overtime import build_overtime_blocks
+        return build_overtime_blocks(normalized_data, unassigned_activity,
+                                     merge_short_commits=merge_short_commits,
+                                     short_commit_merge_minutes=short_commit_merge_minutes,
+                                     commit_allocation_version=commit_allocation_version)
     if unassigned_activity is not None:
         from copy import deepcopy
         from activity_review import validate_unassigned_activity

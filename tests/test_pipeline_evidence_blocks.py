@@ -59,7 +59,7 @@ class TestPipelineEvidenceBlocks(unittest.TestCase):
         rows = self.rows()
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["entry"]["duration_minutes"], 30)
-        self.assertEqual(rows[0]["entry"]["description"], "Daily stand-up. PRs: None")
+        self.assertEqual(rows[0]["entry"]["description"], "Scheduled calendar activity; attendance unconfirmed. PRs: None")
         self.assertEqual(rows[0]["time_basis"], "scheduled")
         self.assertEqual(json.loads(self.ai.read_text())["blocks"], [])
 

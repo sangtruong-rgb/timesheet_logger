@@ -44,52 +44,33 @@ def format_pr_suffix(prs: List[Dict[str, Any]]) -> str:
 
 
 def synthesize_deterministic_summary(block: Dict[str, Any]) -> str:
-    """Fallback deterministic summary when AI judgment is not provided."""
+    """English fallback without guessing translations of untrusted source titles.
+
+    Detailed translated summaries belong to the AI stage. Original titles/messages
+    remain in sources; this path reports only the available evidence and schedule.
+    """
     cal_titles = block.get("calendar_titles", [])
     commits = block.get("commits", [])
     prs = block.get("prs", [])
 
     if block.get("calendar_overlap"):
-        titles = "; ".join(cal_titles).strip() or "Calendar events"
-        text = f"Calendar overlap — attendance confirmation required: {titles}"
-        return text if text.endswith((".", "!", "?")) else f"{text}."
-
-    # Pure meeting block
+        return "Overlapping calendar events; attendance confirmation required."
     if not commits and not prs and (cal_titles or block.get("time_basis") == "scheduled"):
-        text = "; ".join(cal_titles).strip() or "Calendar event"
-        return text if text.endswith((".", "!", "?")) else f"{text}."
+        return "Scheduled calendar activity; attendance unconfirmed."
 
-    # Block with commits / PRs
-    summary_parts = []
-    if cal_titles and cal_titles[0] not in ("Development", "Focus"):
-        summary_parts.append(cal_titles[0])
-
-    commit_msgs = [c.get("message", "").strip() for c in commits if c.get("message", "").strip()]
-    pr_titles = [p.get("title", "").strip() for p in prs if p.get("title", "").strip()]
-
-    combined = commit_msgs + pr_titles
-    tickets = extract_tickets(combined)
+    texts = [c.get("message", "") for c in commits] + [p.get("title", "") for p in prs]
+    tickets = extract_tickets(texts)
     ticket_prefix = f"[{', '.join(tickets)}] " if tickets else ""
-
-    if combined:
-        first = combined[0]
-        # Clean prefix if any (e.g. feat: fix: chore:)
-        cleaned = first
-        for prefix in ["feat:", "fix:", "chore:", "docs:", "refactor:", "test:"]:
-            if cleaned.lower().startswith(prefix):
-                cleaned = cleaned[len(prefix):].strip()
-        cleaned = cleaned.capitalize()
-        if len(combined) > 1:
-            summary_parts.append(f"{ticket_prefix}{cleaned} and related improvements")
-        else:
-            summary_parts.append(f"{ticket_prefix}{cleaned}")
-    else:
-        summary_parts.append(f"{ticket_prefix}Project development and focus tasks".strip())
-
-    text = ". ".join(summary_parts)
-    if not text.endswith("."):
-        text += "."
-    return text
+    evidence = []
+    if commits:
+        evidence.append(f"{len(commits)} recorded commit{'s' if len(commits) != 1 else ''}")
+    # Multiple PR actions may reference the same PR. Count distinct references.
+    references = {(p.get("repository", ""), p["id"]) for p in prs if p.get("id") is not None}
+    if references:
+        evidence.append(f"{len(references)} pull request{'s' if len(references) != 1 else ''}")
+    if evidence:
+        return f"{ticket_prefix}Development activity based on {' and '.join(evidence)}."
+    return f"{ticket_prefix}Project development and focus tasks."
 
 
 class AIJudgmentError(BlockIdentityError):
@@ -216,6 +197,8 @@ def build_entries(
         if 'work_schedule' in b:
             from work_schedule import validate_schedule
             validate_schedule(b['work_schedule'])
+        from overtime import validate_classification
+        validate_classification(b)
 
         # Resolve topic summary
         topic_summary = ""
@@ -249,6 +232,8 @@ def build_entries(
             **({"estimation_policy": b["estimation_policy"]} if "estimation_policy" in b else {}),
             **({"work_confirmation": b["work_confirmation"]} if "work_confirmation" in b else {}),
             **({"work_schedule": b["work_schedule"]} if "work_schedule" in b else {}),
+            **({"work_type": b["work_type"], 'main_work_windows': b['main_work_windows']} if 'work_type' in b else {}),
+            **({'overtime_confirmation': b['overtime_confirmation']} if 'overtime_confirmation' in b else {}),
             **({"allocation": b["allocation"]} if "allocation" in b else {}),
             **({"calendar_overlap": True} if b.get("calendar_overlap") else {}),
             **({"review": b["review"]} if b.get("review") else {}),

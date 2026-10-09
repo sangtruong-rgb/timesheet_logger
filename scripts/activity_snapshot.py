@@ -21,7 +21,7 @@ def read_snapshot(path):
     try:
         snapshot = json.loads(Path(path).read_text(encoding="utf-8"))
         if (not isinstance(snapshot, dict) or type(snapshot.get('schema_version')) is not int
-                or snapshot['schema_version'] not in (1, 2, 3, 4, 5, 6)):
+                or snapshot['schema_version'] not in (1, 2, 3, 4, 5, 6, 7, 8)):
             raise ValueError("Unsupported snapshot")
         expected = snapshot["fingerprint"]
         body = {k: v for k, v in snapshot.items() if k != "fingerprint"}
@@ -33,6 +33,13 @@ def read_snapshot(path):
             raise ValueError('Snapshot schedule requires schema v5')
         if (snapshot['schema_version'] >= 6) != ('windows' in snapshot['normalized'].get('work_confirmation', {})):
             raise ValueError('Snapshot confirmed windows require schema v6')
+        if (snapshot['schema_version'] >= 7) != ('overtime_review' in snapshot['normalized']):
+            raise ValueError('Snapshot OT review requires schema v7')
+        if (snapshot['schema_version'] >= 8) != ('policy' in snapshot['normalized'].get('overtime_review', {})):
+            raise ValueError('Snapshot default OT policy requires schema v8')
+        if (snapshot['schema_version'] >= 7 and snapshot['collection'].get('overtime_review')
+                != snapshot['normalized']['overtime_review']):
+            raise ValueError('Snapshot OT decision conflicts with its collection metadata')
         index_blocks(snapshot["blocks"])
         validate_unassigned_activity(snapshot["unassigned_activity"])
         if any(b["date"] != snapshot["normalized"]["date"] for b in snapshot["blocks"]):
@@ -57,8 +64,10 @@ def read_snapshot(path):
 
 def save_snapshot(path, normalized, collection, blocks, unassigned, ai_input, ai_export=None):
     path = Path(path)
-    # v6 freezes explicit daily windows; older snapshots retain their rules.
-    version = (6 if 'windows' in normalized.get('work_confirmation', {}) else
+    # v8 freezes the approved commit-hour default; older snapshots retain rules.
+    version = (8 if 'policy' in normalized.get('overtime_review', {}) else
+               7 if 'overtime_review' in normalized else
+               6 if 'windows' in normalized.get('work_confirmation', {}) else
                5 if 'work_schedule' in normalized else 4)
     body = {"schema_version": version,
             "normalized": normalized, "collection": collection,

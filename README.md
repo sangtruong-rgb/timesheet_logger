@@ -60,8 +60,12 @@ $personal-timesheet-windows 8:00-12:00, 1h30-4:00
 ```
 
 From the terminal, run `./bin/personal-timesheet-codex "8:00-12:00, 1h30-4:00"`.
-Both skill names use the same pipeline: 08:00–12:00 and 13:30–16:00, excluding
-the gap. Add a date to apply the windows to that date. These windows replace
+Both skill names use the same pipeline: 08:00–12:00 and 13:30–16:00 are the
+NORMAL main windows. Each outside-main commit defaults to an approved estimated
+hour ending at its minute-floored timestamp, counting only the portion outside
+main and merging overlaps. No confirmation reply is required. The preview shows
+the default intervals; requested edits or no OT use the same frozen evidence,
+without recollection. NORMAL and OT totals are separate. Add a date to apply the windows to that date. These windows replace
 profile hours/breaks only for this run. See [daily work windows](docs/work-schedule.md#confirmed-daily-windows).
 
 Or type `$personal-timesheet 09:00` inside an existing Codex CLI session opened
@@ -270,6 +274,12 @@ review; no automatic migration. Exact reruns preserve bytes. Corrupt stores rema
 for review. POSIX writer locks and atomic per-file replacements protect updates;
 a recovery journal rolls back failed/interrupted bundles. Readers ignoring locks
 may see intermediate files; this is recoverable multi-file storage.
+
+Work-log descriptions are generated in English for NORMAL and OT entries. Both
+summary strategies translate non-English evidence while retaining ticket keys
+and proper names. Without AI, English templates describe the available evidence
+or scheduled calendar activity; original titles/messages remain in `sources`.
+Calendar attendance remains unconfirmed. Existing saved logs are not rewritten.
 
 ## Token usage
 
