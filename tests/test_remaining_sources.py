@@ -115,7 +115,8 @@ class TestRemainingSources(unittest.TestCase):
         rows = build_entries(build_time_blocks(model))
         self.assertEqual(rows[0]["attendance"], "unconfirmed")
         text = render_markdown(str(DAY), rows)
-        self.assertIn("Theo lịch, chưa xác nhận tham dự", text)
+        self.assertIn("Scheduled; attendance unconfirmed", text)
+        self.assertNotIn("Theo lịch, chưa xác nhận tham dự", text)
         self.assertIn("Total Proposed Time", text)
 
     def test_ambiguous_pr_suffix_qualifies_both_repositories(self):

@@ -82,7 +82,7 @@ def render_markdown(date_str: str, items: List[Dict[str, Any]], collection_statu
     has_estimates = any(item.get("time_basis") == "estimated" for item in items)
     has_schedule = any(item.get("time_basis") == "scheduled" for item in items)
     if has_schedule:
-        lines[4:4] = ["> Theo lịch, chưa xác nhận tham dự. Scheduled intervals are proposals, including future meetings; they are not confirmed work time.", ""]
+        lines[4:4] = ["> Scheduled; attendance unconfirmed. Scheduled intervals are proposals, including future meetings; they are not confirmed work time.", ""]
     has_overlap = any(item.get("calendar_overlap") for item in items)
     if has_overlap:
         lines[4:4] = ["> REVIEW REQUIRED: overlapping Calendar events need attendance confirmation. Scheduled coverage is not confirmed meeting time.", ""]

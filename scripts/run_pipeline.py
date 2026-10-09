@@ -147,6 +147,7 @@ def _run():
     parser.add_argument("--max-remote-commits", type=int, default=10000)
     parser.add_argument("--work-start", help="Confirmed start HH:MM for the target day; selects commit_intervals")
     parser.add_argument("--work-end", help="Optional confirmed end HH:MM (or 24:00); requires --work-start")
+    parser.add_argument('--work-day-start', help='Morning start; auto NORMAL until 12:00 and 13:30-18:30, with default OT')
     parser.add_argument('--work-windows', help='Confirmed daily intervals, e.g. "8:00-12:00, 1h30-4:00"; replaces profile breaks')
     parser.add_argument('--review-ot', action='store_true', help='Apply approved 60-minute OT windows ending at outside-main commits')
     parser.add_argument('--ot-windows', help='User-confirmed OT intervals; only with --phase confirm-ot')
@@ -164,6 +165,17 @@ def _run():
     parser.add_argument("--token-csv-path", help="Isolated token output; default from profile/environment/repo root")
     parser.add_argument("--claude-dir", help="Exact session lookup root (no global usage aggregation)")
     args = parser.parse_args()
+    if args.work_day_start is not None:
+        if (args.phase not in ('run', 'prepare') or args.work_start is not None
+                or args.work_end is not None or args.work_windows is not None):
+            parser.error('--work-day-start requires run/prepare without other work-hour arguments')
+        try:
+            from work_windows import default_work_day_windows
+            windows = default_work_day_windows(args.work_day_start)
+            args.work_windows = ', '.join(f"{window['start']}-{window['end']}" for window in windows)
+            args.review_ot = True
+        except ValueError as exc:
+            parser.error(str(exc))
     if args.phase == 'confirm-ot':
         if (not args.snapshot or not args.resolved_snapshot or args.review_ot
                 or args.work_windows is not None or args.work_start is not None or args.work_end is not None

@@ -10,11 +10,16 @@ Run the repository's deterministic pipeline and use Codex only to summarize its 
 ## Short invocation
 
 `$personal-timesheet 09:00` is a complete request: the clock is the user's
-confirmed work start for today in the configured timezone. A supplied target date
-overrides today. Select `commit_intervals`, collect live configured GitHub and
-Google Calendar sources, run the measured Codex summary when eligible, and assemble
-a preview in the unique audit directory. No Gradion write is authorized by this
-shorthand. Report measured summary usage, or SKIPPED when no AI block is eligible.
+confirmed morning start for today in the configured timezone. Use
+`--work-day-start HH:MM`: Python creates start–12:00 and 13:30–18:30 as the
+NORMAL windows and enables the approved commit-hour OT rule. For example, 08:30
+means 08:30–12:00 plus five afternoon hours, 13:30–18:30. Show these expanded
+windows in the preview. The full approved windows, including the closing tail,
+are estimated proposals even without later commits; they are not measured work.
+A supplied date overrides today. Collect live sources, run the measured Codex
+summary when eligible, and assemble in a unique audit directory. No Gradion write
+is authorized by shorthand. Report measured summary usage, or SKIPPED when no AI
+block is eligible. A start at or after noon requires explicit work windows.
 
 `$personal-timesheet 8:00-12:00, 1h30-4:00` is also a complete preview request.
 Pass the range text unchanged as one `--work-windows` argument; Python resolves
@@ -31,8 +36,9 @@ skill supports the same workflow.
 Proceed without reconfirming the supplied start, today's date, the configured
 sources, or preview mode. With no start, ask only "Hôm nay bạn bắt đầu làm lúc
 mấy giờ?" (use the target date if supplied). For an invalid or ambiguous clock,
-ask for clarification rather than guessing. An omitted end means stop at the last
-commit; do not ask for an end or mid-session breaks just to complete the preview.
+ask for clarification rather than guessing. When only a morning start is supplied,
+use the approved noon / five-hour afternoon default; do not ask for an end or
+mid-session breaks just to complete the preview.
 Explicit instructions such as another date, a finishing time, or a request to
 publish override these defaults and still use the publishing rules below.
 
@@ -57,15 +63,14 @@ launcher checks Codex login, GitHub authentication and Calendar dependencies.
    comma-separated text and
    `TS_HOURS_ARGS=(--work-windows "$TS_WORK_WINDOWS" --review-ot)`.
    Do not also pass start/end flags or ask for a start already supplied by a window.
-   Otherwise, for `commit_intervals`, use the user's confirmed start for this target date as
-   `TS_WORK_START`. Ask for it only when absent; never assume 09:00 or reuse another
-   day's hours. Pass `--work-start "$TS_WORK_START"` when preparing. If the user
-   supplies a confirmed finishing time, also pass `--work-end HH:MM` (or `24:00`);
-   otherwise stop at the last commit and report the uncounted tail. Do not ask about
-   mid-session breaks. Daily confirmations are frozen in the snapshot; changing
-   them requires a new prepare run, not assemble flags. Set
-   `TS_HOURS_ARGS=(--work-start "$TS_WORK_START")` and append
-   `TS_HOURS_ARGS+=(--work-end "$TS_WORK_END")` only when supplied.
+   Otherwise, use the user's morning start for this target date as `TS_WORK_START`.
+   Ask only when absent; never assume 09:00 or reuse another day's start.
+   With only a start, set `TS_HOURS_ARGS=(--work-day-start "$TS_WORK_START")`.
+   Python expands the main windows and enables OT; do not convert this request to
+   plain `--work-start` or perform clock arithmetic in the skill. If the user gives
+   an explicit end instead, use `--work-start` and `--work-end` for that custom
+   request, or `--work-windows` plus `--review-ot` for explicit main windows with OT.
+   Daily confirmations are frozen; changing main hours requires a new prepare run.
 
 ## Prepare and summarize
 
@@ -93,7 +98,8 @@ available permissions. If any live source still fails, retain its diagnostic and
 draft, report `INCOMPLETE`, and stop dependent work. Never substitute a fixture,
 sample, historical export, or older snapshot.
 
-For window requests, `--review-ot` applies the approved default: 60 minutes
+For explicit windows, `--review-ot` applies the approved default;
+`--work-day-start` enables it automatically: 60 minutes
 ending at each outside-main commit (minute precision), subtracting main coverage
 and merging overlapping OT windows. Snapshot v8 freezes the rule and approval
 basis; `defaulted` counts as approved by the standing user rule. Continue to
@@ -138,7 +144,9 @@ Write all work-log descriptions in English, including NORMAL and OT rows, even
 when the user or source evidence uses Vietnamese. Preserve ticket keys and proper
 names. Keep original source text for audit; do not translate or rewrite evidence.
 The script fallback uses English evidence-based templates, not title translation.
-User-facing conversation may remain in the user's language.
+Timesheet previews and final reports must also be in English, including table
+headings, attendance/status labels, totals, review notes and token-usage notes.
+Clarifying questions and discussion outside the report may use the user's language.
 
 ## Review and attendance
 
@@ -172,7 +180,8 @@ User-facing conversation may remain in the user's language.
   profile hours/breaks for that date. Window requests label main rows NORMAL and
   approved default or user-overridden outside intervals OT, with separate totals. Calendar
   attendance is a separate fact. No BREAK rows or automatic billing mapping are
-  added. Single-start requests and older snapshots retain their previous flow.
+  added. Morning-start shorthand expands via `--work-day-start`; older snapshots
+  and direct Python `--work-start` requests retain their previous flow.
 
 ## Publish to Gradion
 
@@ -183,6 +192,9 @@ Before publishing, read [references/gradion.md](references/gradion.md). List exi
 If the user asks only to check, generate, preview, or audit, do not call a Gradion write tool.
 
 ## Report
+
+Write the complete preview or submission report in English; do not translate its
+attendance labels, table headings or usage notes into Vietnamese.
 
 Report the date and timezone, source mode/status/counts, snapshot run ID, proposed or submitted intervals, estimated/scheduled basis, attendance state, unassigned review count, measured Codex input/output/cached/total counts and scope when available, Gradion entry IDs when published, and artifact paths. Never print credentials, OAuth files, bearer tokens, or full private configuration.
 

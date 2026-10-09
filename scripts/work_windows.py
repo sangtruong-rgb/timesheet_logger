@@ -54,6 +54,19 @@ def parse_work_windows(text):
     return validate_work_windows(result)
 
 
+def default_work_day_windows(start):
+    """User-approved shorthand: morning until noon, then five afternoon hours."""
+    if not isinstance(start, str):
+        raise ValueError('--work-day-start requires a morning clock before 12:00')
+    candidates = [value for value in _clock_candidates(start) if value < 12 * 60]
+    if not candidates:
+        raise ValueError('--work-day-start must be before 12:00; use --work-windows for other hours')
+    return validate_work_windows([
+        {'start': _hhmm(min(candidates)), 'end': '12:00'},
+        {'start': '13:30', 'end': '18:30'},
+    ])
+
+
 def validate_work_windows(windows):
     checked = ranges(windows, 'confirmed_windows')
     if not checked or checked != windows:

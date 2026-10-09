@@ -135,8 +135,9 @@ allocation topics, short allocations merge only with a preceding piece of the
 same type, and the writer rejects incorrect classifications. Markdown and the
 collection manifest include separate NORMAL/OT totals.
 
-No BREAK input or work row is added. Plain Python requests without `--review-ot`
-and single-start skill requests retain their existing behavior. V1–v7 snapshots
+No BREAK input or work row is added. Morning-start skill requests now use
+`--work-day-start`, which includes OT. Direct Python requests without `--review-ot`
+or `--work-day-start` retain their existing behavior. V1–v7 snapshots
 replay their frozen rules; an old v7 pending decision still needs actual user hours,
 and is not silently upgraded to the new default. V8 freezes the policy, default
 windows, approval basis and overrides.
@@ -155,6 +156,33 @@ token evidence. In particular, the old legacy morning-only fallback ending at 12
 is preserved for historical replay; new scheduled models end at the configured
 morning boundary, normally 12:00. A schedule field cannot be backdated into a v1–v4
 snapshot, and a rehashed schedule edit that conflicts with frozen rows is rejected.
+
+## Morning-start shorthand
+
+`$personal-timesheet 08:30` and the launcher now use `--work-day-start 08:30`.
+This expands the user-approved default to 08:30–12:00 and 13:30–18:30, with five
+hours in the afternoon. The fixed lunch gap replaces profile breaks for this date;
+profile settings are preserved. `--work-day-start` automatically enables default
+OT for commits outside the two NORMAL windows, including early-morning commits.
+Main windows and OT policy are frozen in snapshot v8. Full main coverage, including
+the 18:30 closing tail without a commit, remains an estimate, not measured work.
+
+```bash
+.venv/bin/python scripts/run_pipeline.py --phase prepare \
+  --config config/user-config.json --date 2026-10-09 \
+  --work-day-start 08:30 \
+  --snapshot data/audit/my-new-run/activity.json \
+  --export-ai-input data/audit/my-new-run/ai-input.json \
+  --output-dir data/audit/my-new-run/timesheets
+```
+
+Only a morning start before 12:00 is valid in this mode. Use explicit
+`--work-windows` for afternoon starts or other hours. The default cannot be mixed
+with `--work-start`, `--work-end` or `--work-windows`, nor passed to assemble or
+confirm-ot. The latter phases use the existing frozen hours. Direct Python
+`--work-start` still keeps its earlier semantics; new skill shorthand uses the
+new flag. Explicit user-supplied ranges override the default rather than expanding
+or extending them.
 
 ## Token correctness fixes
 

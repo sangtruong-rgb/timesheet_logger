@@ -315,3 +315,26 @@ Validation: 655 tests passed, including prompt checks for both summary strategie
 English fallback from Vietnamese/Chinese/unaccented input, source preservation,
 PR deduplication and idempotent assembly. Both Codex skills passed quick_validate;
 git diff --check passed. No live model benchmark, publication, commit or push ran.
+
+
+## 2026-10-09 — Morning-start default and English preview reports
+
+User-approved shorthand: work from the supplied morning start until 12:00, then
+13:30–18:30 (five afternoon hours). The skill passes --work-day-start to Python;
+it expands exact main windows and automatically applies default commit-hour OT.
+For 08:30, NORMAL totals 510 proposed minutes. Early commits now create OT even
+when no commits follow the start. Lunch contributes no NORMAL time; an outside-main
+commit may contribute approved estimated OT during lunch. Main coverage, including
+future/closing tails, remains an estimate rather than measured work.
+
+The new mode rejects nonmorning clocks, conflicting hour arguments and frozen-phase
+overrides before source collection. Snapshot v8 freezes the resulting windows and
+policy without changing the profile. Explicit ranges, direct legacy --work-start
+requests and older snapshots keep their own behavior. Preview/final reports now
+use English throughout, and the remaining Vietnamese Calendar banner is replaced.
+
+Validation: 665 tests passed, including 10 new shorthand/parser/pipeline cases,
+early/lunch/late OT, the exact afternoon boundary, no-source proposed windows,
+source retention, frozen byte-stable replay and pre-collection rejection. Both
+Codex skills validate; launcher shell syntax and git diff --check pass. No live
+collection, model call, timesheet publication, commit or push was performed.
