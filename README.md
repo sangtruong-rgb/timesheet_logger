@@ -52,6 +52,13 @@ For a short request with your confirmed start time:
 ./bin/personal-timesheet-codex 09:00
 ```
 
+A morning start alone now creates NORMAL windows from that start to 12:00 and
+13:30–18:30 (five afternoon hours), with approved estimated OT outside them.
+For example, `08:30` means 08:30–12:00 and 13:30–18:30. The full windows are
+proposals, including the closing tail even when there are no later commits.
+The skill uses Python's `--work-day-start HH:MM`; it does not compute the windows
+itself. A start at or after noon needs explicit windows.
+
 Multiple confirmed windows for today (preview only):
 
 ```text
@@ -71,8 +78,9 @@ profile hours/breaks only for this run. See [daily work windows](docs/work-sched
 Or type `$personal-timesheet 09:00` inside an existing Codex CLI session opened
 in this repository. This requests today's live-source preview with measured Codex
 summary usage when eligible. The skill asks for a missing start or other blocking
-information, without reconfirming supplied facts. An omitted end stops allocation
-at the last commit. Specify another date or an end in plain language when needed;
+information, without reconfirming supplied facts. A morning start without an end
+uses the noon / five-hour afternoon default with OT. Specify another date or
+custom hours in plain language when needed;
 publishing to Gradion requires an explicit request.
 
 The launcher starts a fresh Codex session in this repository with network access
@@ -155,9 +163,11 @@ response status and bounds remain audit evidence when available.
 
 ### Commit intervals (current profile)
 
-Set `block_policy` to `{"strategy": "commit_intervals"}`. Each run requires
-`--work-start HH:MM`, explicitly confirmed by the user for the selected date in the
-configured timezone. The example above uses an illustrative 09:00; never assume it.
+Set `block_policy` to `{"strategy": "commit_intervals"}`. Each run requires daily
+hours: `--work-day-start HH:MM` for the approved morning / five-hour afternoon
+shorthand with OT, or explicit `--work-windows` for custom main windows. Direct
+Python `--work-start HH:MM` retains the legacy start-only behavior below. The start
+is supplied by the user for the selected date in the configured timezone. The example above uses an illustrative 09:00; never assume it.
 Passing `--work-start` also selects this strategy for older profiles. Optionally
 pass `--work-end HH:MM` (or `24:00`) to include work after the last commit. Without
 an end, allocation stops at the final commit. Neither clock is a reusable profile
@@ -275,7 +285,8 @@ for review. POSIX writer locks and atomic per-file replacements protect updates;
 a recovery journal rolls back failed/interrupted bundles. Readers ignoring locks
 may see intermediate files; this is recoverable multi-file storage.
 
-Work-log descriptions are generated in English for NORMAL and OT entries. Both
+Work-log descriptions, timesheet previews and final reports are generated in English
+for NORMAL and OT entries. Clarifying conversation may use the user's language. Both
 summary strategies translate non-English evidence while retaining ticket keys
 and proper names. Without AI, English templates describe the available evidence
 or scheduled calendar activity; original titles/messages remain in `sources`.

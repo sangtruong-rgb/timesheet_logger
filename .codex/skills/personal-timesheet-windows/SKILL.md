@@ -26,7 +26,9 @@ Write all work-log descriptions in English, including NORMAL and OT rows, even
 when the user or source evidence uses Vietnamese. Preserve ticket keys and proper
 names. Keep original source text for audit; do not translate or rewrite evidence.
 The script fallback uses English evidence-based templates, not title translation.
-User-facing conversation may remain in the user's language.
+Timesheet previews and final reports must also be in English, including table
+headings, attendance/status labels, totals, review notes and token-usage notes.
+Clarifying questions and discussion outside the report may use the user's language.
 
 These daily windows replace profile hours and breaks for this date, including on
 holidays. These are the day's main NORMAL windows. For each commit outside

@@ -18,6 +18,7 @@ access for the personal-timesheet skill. Codex still uses approval policy
 on-request. Run it only from this trusted checkout.
 
 A start time or a list of work windows requests today's live-source preview.
+A morning start alone uses start-12:00 and 13:30-18:30, with default OT.
 Windows such as 8:00-12:00, 1h30-4:00 select 08:00-12:00 and 13:30-16:00.
 With no start or windows, the skill asks for the start. Publishing requires an
 explicit request.

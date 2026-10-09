@@ -1,6 +1,8 @@
 # Approved default OT and requested overrides
 
 Prepare range requests with `--work-windows "$TS_WORK_WINDOWS" --review-ot`.
+Morning-start shorthand uses `--work-day-start HH:MM`, which automatically enables
+OT and defines main as start–12:00 plus 13:30–18:30.
 Main windows are NORMAL. The user's standing rule approves one estimated hour
 before each outside-main commit, using its minute-floored time as the end. Subtract
 main coverage, clip to the selected local day, and union overlapping OT intervals.

@@ -45,9 +45,9 @@ Choose a new RUN directory for every fresh collection or AI invocation:
 
 ```bash
 RUN="data/audit/codex-$(date +%Y%m%d-%H%M%S)"
-# Replace date and work-start with the user's confirmed daily values.
+# Replace date and morning start with the user's daily values.
 python3 scripts/run_pipeline.py --phase prepare --date 2026-10-07 \
-  --work-start 09:00 \
+  --work-day-start 09:00 \
   --config config/user-config.json --snapshot "$RUN/activity.json" \
   --export-ai-input "$RUN/ai-input.json" --output-dir "$RUN/timesheets"
 

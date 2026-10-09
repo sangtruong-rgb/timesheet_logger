@@ -11,16 +11,20 @@ and token accounting. Use AI only to summarize the provided block text. Read
 
 Short invocation: `$personal-timesheet 09:00` confirms a 09:00 work start for today
 in the configured timezone and requests a live-source preview with `commit_intervals`.
-An explicit date overrides today. Use an isolated audit directory. Do not reconfirm
-the supplied start or ask for an optional end; without an end, stop at the last
-commit. If the start is missing or ambiguous, ask a short question for that fact.
+An explicit date overrides today. With a morning start alone, use
+`--work-day-start HH:MM`: Python creates start–12:00 and 13:30–18:30 as NORMAL
+and enables approved commit-hour OT. Show the full windows as estimated proposals,
+including the closing tail without a later commit. Use an isolated audit directory;
+do not reconfirm supplied hours or ask for an optional end. For a start at or after
+noon, request explicit windows. If the start is missing or ambiguous, ask for it.
 For other blockers, complete independent checks and ask only for the information
 or user action needed to continue. Never ask for credential contents. This shorthand
 does not authorize publishing. Explicit user instructions override these defaults.
 
 Range invocation: `$personal-timesheet 8:00-12:00, 1h30-4:00` requests the same
 preview within 08:00–12:00 and 13:30–16:00. Pass the supplied comma-separated
-text as one quoted `--work-windows` argument instead of start/end flags. Python
+text as one quoted `--work-windows` argument with `--review-ot` instead of
+start/end flags. Python
 resolves shorthand clocks in chronological order; padded HH:MM remains 24-hour
 and explicit AM/PM is accepted. Show canonical windows. They replace profile
 hours/breaks only for this date, exclude gaps, clip Calendar proposals, and include
@@ -38,18 +42,17 @@ print or commit credentials/token contents. Do not edit Calendar or infer attend
    Create an isolated run directory under `${CLAUDE_SKILL_DIR}/data/audit/` for audits.
    Mark the skill run's aware start timestamp, session identity and usage message IDs
    when available. Record accurate boundaries; do not guess transcript identities.
-2. For the current `commit_intervals` policy, obtain the user's confirmed start
-   for the target day and pass `--work-start HH:MM`. Reuse an explicit confirmation
-   already supplied for that date; never infer 09:00 or reuse another day's hours.
-   Pass `--work-end HH:MM` only if the user confirms a finishing time; otherwise
-   stop at the last commit and report that remaining time is not included. Do not
-   ask about mid-session breaks. For range invocation, substitute
-   `--work-windows "$TS_WORK_WINDOWS"` for the start/end flags. Prepare with quoted absolute paths:
+2. Obtain the user's morning start for the target day. Reuse a supplied start;
+   never assume 09:00 or reuse another day's start. For a start alone, pass
+   `--work-day-start HH:MM`; Python expands the noon / five-hour afternoon default
+   and enables OT. Explicit user ranges instead use `--work-windows` plus
+   `--review-ot`. For a custom start/end request, use `--work-start` and `--work-end`.
+   Do not ask about mid-session breaks. Prepare with quoted absolute paths:
 
    ```bash
    python3 "${CLAUDE_SKILL_DIR}/scripts/run_pipeline.py" --phase prepare \
      --config "${CLAUDE_SKILL_DIR}/config/user-config.json" --date YYYY-MM-DD \
-     --work-start "$TS_WORK_START" \
+     --work-day-start "$TS_WORK_START" \
      --snapshot "${CLAUDE_SKILL_DIR}/data/audit/RUN/activity.json" \
      --export-ai-input "${CLAUDE_SKILL_DIR}/data/audit/RUN/ai-input.json" \
      --output-dir "${CLAUDE_SKILL_DIR}/data/audit/RUN/timesheets"
@@ -101,9 +104,9 @@ print or commit credentials/token contents. Do not edit Calendar or infer attend
    are cumulative per run and explicitly self-reported. Daily aggregation follows
    the run's execution-start day; the timesheet date stays separate. Report input,
    output, cache and total (including cache) separately from payload size.
-6. Report source states, collection COMPLETE/INCOMPLETE/DEMO, output paths, fallback
+6. Write the complete preview or final report in English. Report source states, collection COMPLETE/INCOMPLETE/DEMO, output paths, fallback
    or AI summaries, and any unassigned/attendance review. Keep full-day future
-   meetings as proposals: **Theo lịch, chưa xác nhận tham dự**. Scheduled/estimated
+   meetings as proposals: **Scheduled; attendance unconfirmed**. Scheduled/estimated
    minutes are not measured work. Commit intervals allocate time from confirmed
    start to each closing commit, subtract frozen configured breaks (default lunch
    12:00–13:30) and Calendar coverage,
