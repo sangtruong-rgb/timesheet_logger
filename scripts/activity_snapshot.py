@@ -21,7 +21,7 @@ def read_snapshot(path):
     try:
         snapshot = json.loads(Path(path).read_text(encoding="utf-8"))
         if (not isinstance(snapshot, dict) or type(snapshot.get('schema_version')) is not int
-                or snapshot['schema_version'] not in (1, 2, 3, 4, 5, 6, 7, 8)):
+                or snapshot['schema_version'] not in (1, 2, 3, 4, 5, 6, 7, 8, 9)):
             raise ValueError("Unsupported snapshot")
         expected = snapshot["fingerprint"]
         body = {k: v for k, v in snapshot.items() if k != "fingerprint"}
@@ -29,15 +29,20 @@ def read_snapshot(path):
             raise ValueError("Snapshot fingerprint mismatch")
         if snapshot["collection"]["status"] not in ("complete", "demo") or not isinstance(snapshot["run_id"], str):
             raise ValueError("Unsuccessful or unidentified snapshot")
-        if (snapshot['schema_version'] >= 5) != ('work_schedule' in snapshot['normalized']):
+        legacy = snapshot['schema_version'] < 9
+        if legacy and (snapshot['schema_version'] >= 5) != ('work_schedule' in snapshot['normalized']):
             raise ValueError('Snapshot schedule requires schema v5')
-        if (snapshot['schema_version'] >= 6) != ('windows' in snapshot['normalized'].get('work_confirmation', {})):
+        if legacy and (snapshot['schema_version'] >= 6) != ('windows' in snapshot['normalized'].get('work_confirmation', {})):
             raise ValueError('Snapshot confirmed windows require schema v6')
-        if (snapshot['schema_version'] >= 7) != ('overtime_review' in snapshot['normalized']):
+        if legacy and (snapshot['schema_version'] >= 7) != ('overtime_review' in snapshot['normalized']):
             raise ValueError('Snapshot OT review requires schema v7')
-        if (snapshot['schema_version'] >= 8) != ('policy' in snapshot['normalized'].get('overtime_review', {})):
+        if legacy and (snapshot['schema_version'] >= 8) != ('policy' in snapshot['normalized'].get('overtime_review', {})):
             raise ValueError('Snapshot default OT policy requires schema v8')
-        if (snapshot['schema_version'] >= 7 and snapshot['collection'].get('overtime_review')
+        from commit_groups import SUPPORTED_GROUPING_POLICIES
+        if ((snapshot['schema_version'] == 9) != ('commit_grouping' in snapshot['normalized'])
+                or (not legacy and snapshot['normalized']['commit_grouping'] not in SUPPORTED_GROUPING_POLICIES)):
+            raise ValueError('Snapshot commit grouping requires schema v9')
+        if ('overtime_review' in snapshot['normalized'] and snapshot['collection'].get('overtime_review')
                 != snapshot['normalized']['overtime_review']):
             raise ValueError('Snapshot OT decision conflicts with its collection metadata')
         index_blocks(snapshot["blocks"])
@@ -64,8 +69,9 @@ def read_snapshot(path):
 
 def save_snapshot(path, normalized, collection, blocks, unassigned, ai_input, ai_export=None):
     path = Path(path)
-    # v8 freezes the approved commit-hour default; older snapshots retain rules.
-    version = (8 if 'policy' in normalized.get('overtime_review', {}) else
+    # v9 freezes PR/ticket grouping; v8 and older retain their allocation rules.
+    version = (9 if 'commit_grouping' in normalized else
+               8 if 'policy' in normalized.get('overtime_review', {}) else
                7 if 'overtime_review' in normalized else
                6 if 'windows' in normalized.get('work_confirmation', {}) else
                5 if 'work_schedule' in normalized else 4)

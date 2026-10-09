@@ -327,9 +327,23 @@ def _run():
             normalized["block_policy"] = block_policy
         if confirmation is not None:
             normalized["work_confirmation"] = confirmation
+            from commit_groups import GROUPING_POLICY, enrich_commit_prs
+            normalized['commit_grouping'] = GROUPING_POLICY
+            if incomplete or demo:
+                # Fixtures and failed collections must never trigger additional live lookups.
+                for commit in normalized['commits']:
+                    commit['pr_association'] = {'status': 'unknown', 'prs': [],
+                                                'reason': 'incomplete_collection' if incomplete else 'demo_source'}
+                association_counts = {'resolved': 0, 'unknown': len(normalized['commits'])}
+            else:
+                association_counts = enrich_commit_prs(normalized['commits'],
+                                                       use_git_credentials=selected['use_git_credentials'])
+            collection['commit_pr_associations'] = association_counts
+            print(f"   commit/PR associations: {association_counts}")
         if args.review_ot:
             from overtime import initial_review
-            normalized['overtime_review'] = initial_review(normalized)
+            normalized['overtime_review'] = (initial_review(normalized, work_day=True)
+                                             if args.work_day_start is not None else initial_review(normalized))
             collection['overtime_review'] = normalized['overtime_review']
     except ActivityNormalizationError as exc:
         raw = {"date": date_str, "timezone": selected["timezone_name"], "commits": commits_data,

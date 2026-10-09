@@ -6,8 +6,12 @@ description: Create a proposed daily timesheet from verified Git commits, GitHub
 # Personal timesheet
 
 Use scripts for collection, date/time math, matching, validation, suffixes, storage
-and token accounting. Use AI only to summarize the provided block text. Read
+and token accounting. Use AI only to summarize supplied block text and propose groups within script-owned candidates. Read
 [workflow.md](workflow.md) for policies and [README.md](README.md) for setup.
+
+Use English for all user-facing communication, including clarifying questions,
+progress updates, explanations, errors and reports, even when the request is in
+Vietnamese. Preserve original source evidence and proper names.
 
 Short invocation: `$personal-timesheet 09:00` confirms a 09:00 work start for today
 in the configured timezone and requests a live-source preview with `commit_intervals`.
@@ -112,7 +116,23 @@ print or commit credentials/token contents. Do not edit Calendar or infer attend
    12:00–13:30) and Calendar coverage,
    and have no 30-minute minimum or 90-minute cap. Split rows may share closing
    commit evidence; this is completion context, not timestamp containment. PRs
-   never add duration. Confirmed hours are frozen in the snapshot; changes require
+   never add duration. New prepare runs group adjacent pieces by a single verified
+   PR, or a unique shared ticket in one repository after an empty successful PR
+   lookup. Failed/ambiguous lookups remain separate; duration alone never merges
+   work. Breaks, Calendar, NORMAL/OT and confirmed-end tails remain boundaries.
+   Snapshot v9 freezes this policy; older snapshots retain their original grouping.
+   For new Codex runs, payload v6 groups related work sessions in the isolated
+   summary call: prefer grouping related implementation, fixes, tests, reports and
+   integration of one workflow/deliverable, even across PRs. Merge-only jobs join
+   related adjacent work. Write a short outcome-focused description, not a list
+   of every commit. Review `codex/grouping.json` against the frozen blocks: the script
+   validates adjacency, unchanged minutes, repository/work-type boundaries and a
+   four-hour maximum for new groups. Keep unrelated or uncertain jobs separate;
+   PR absence or short duration alone is not a reason to merge. Descriptions use
+   one or two sentences plus the script-owned union of source PRs. Final JSON
+   retains `source_block_ids` and source allocations. No additional model call is
+   needed. Old payloads and Python-only fallback keep their prior behavior.
+   Confirmed hours are frozen in the snapshot; changes require
    a new prepare run. An accepted commit-interval policy and confirmed daily hours
    do not require another per-block boundary confirmation. Activity-cluster boundaries are inferred and must
    be confirmed or overridden before publishing. Work schedule settings are frozen

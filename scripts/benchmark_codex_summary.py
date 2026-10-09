@@ -65,7 +65,7 @@ def benchmark(snapshot_path, directory, *, model, codex='codex', timeout=300, re
     snapshot = read_snapshot(snapshot_path)
     directory = Path(directory).resolve()
     directory.mkdir(parents=True, exist_ok=resume)
-    results, entries = {}, {}
+    results, entries, source_entries = {}, {}, {}
     for strategy in ('legacy', 'compact'):
         result_path = directory / (strategy + '-result.json')
         if resume and result_path.exists():
@@ -96,7 +96,12 @@ def benchmark(snapshot_path, directory, *, model, codex='codex', timeout=300, re
         result['total_tokens'] = usage['input_tokens'] + usage['output_tokens']
         result['uncached_input_tokens'] = usage['input_tokens'] - usage['cached_input_tokens']
         results[strategy] = result
-        entries[strategy] = build_entries(snapshot['blocks'], json.loads(Path(result['ai_output']).read_text()))
+        judgments = json.loads(Path(result['ai_output']).read_text())
+        entries[strategy] = build_entries(snapshot['blocks'], judgments)
+        # Validate the accepted grouped rows above; compare each original source
+        # interval below. Compact v5+ is allowed to present fewer rows than legacy.
+        source_entries[strategy] = build_entries(snapshot['blocks'], [
+            {k: v for k, v in item.items() if k != 'workstream_group'} for item in judgments])
         collect_run(result['usage_run_manifest'], ZoneInfo(snapshot['normalized']['timezone']),
                     expected_target=snapshot['normalized']['date'], expected_run=snapshot['run_id'],
                     expected_ai_output=result['ai_output'])
@@ -105,8 +110,8 @@ def benchmark(snapshot_path, directory, *, model, codex='codex', timeout=300, re
     def structural(rows):
         return [{**row, 'entry': {k: v for k, v in row['entry'].items() if k != 'description'}} for row in rows]
 
-    if structural(entries['legacy']) != structural(entries['compact']):
-        raise ValueError('Benchmark changed timesheet intervals, evidence or metadata')
+    if structural(source_entries['legacy']) != structural(source_entries['compact']):
+        raise ValueError('Benchmark changed source intervals, evidence or metadata')
     if results['legacy']['cli_version'] != results['compact']['cli_version']:
         raise ValueError('CLI version changed during benchmark')
     ledger = attempt_ledger(directory, snapshot, model)
@@ -119,11 +124,13 @@ def benchmark(snapshot_path, directory, *, model, codex='codex', timeout=300, re
               'cli_version': before['cli_version'], 'repetitions_per_strategy': 1,
               'scope': 'AI summary invocations only; provider input includes their context; excludes outer chat',
               'results': results, 'timesheet_rows': len(snapshot['blocks']),
-              'intervals_evidence_metadata_unchanged': True,
+              'intervals_evidence_metadata_unchanged': structural(entries['legacy']) == structural(entries['compact']),
+              'source_intervals_evidence_metadata_unchanged': True,
+              'output_rows': {strategy: len(rows) for strategy, rows in entries.items()},
               'attempt_usage': ledger,
               'input_reduction_percent': reduction(before['provider_usage']['input_tokens'], after['provider_usage']['input_tokens']),
               'total_reduction_percent': reduction(before['total_tokens'], after['total_tokens']),
-              'quality_note': 'Coverage and structural equivalence validated; description meaning requires review. One pair is not a statistical estimate.'}
+              'quality_note': 'Source coverage and evidence validated; compact grouping may reduce rows. Description meaning requires review. One pair is not a statistical estimate.'}
     (directory / 'benchmark.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
     return report
 

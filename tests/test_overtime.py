@@ -78,7 +78,38 @@ class TestDefaultOvertime(unittest.TestCase):
 
     def test_before_main_and_lunch_default_windows(self):
         value = automatic_model([commit('07:00'), commit('13:00', 'lunch')])
-        self.assertEqual(default_overtime_windows(value), [{'start': '06:00', 'end': '07:00'}, {'start': '12:00', 'end': '13:00'}])
+        self.assertEqual(default_overtime_windows(value), [{'start': '06:00', 'end': '07:00'}])
+
+    def test_lunch_commit_is_evidence_without_counted_time(self):
+        value = automatic_model([commit('13:09', 'lunch')])
+        self.assertEqual(value['overtime_review']['status'], 'not_needed')
+        self.assertEqual(len(value['overtime_review']['observations']), 1)
+        blocks = build_time_blocks(value)
+        self.assertEqual(sum(b['duration_minutes'] for b in blocks), 390)
+        self.assertTrue(all(b['work_type'] == 'NORMAL' for b in blocks))
+
+    def test_breaks_clip_both_sides_of_default_hour(self):
+        value = window_model([commit('13:45')], text='08:00-11:00, 14:00-16:00')
+        self.assertEqual(default_overtime_windows(value), [{'start': '13:30', 'end': '13:45'}])
+        value['commits'] = [commit('12:15')]
+        self.assertEqual(default_overtime_windows(value), [{'start': '11:15', 'end': '12:00'}])
+
+    def test_frozen_custom_breaks_and_no_breaks_are_respected(self):
+        value = window_model([commit('18:00')])
+        value['work_schedule'] = {'breaks': [{'start': '17:15', 'end': '17:45'}]}
+        self.assertEqual(default_overtime_windows(value), [
+            {'start': '17:00', 'end': '17:15'}, {'start': '17:45', 'end': '18:00'}])
+        value['work_schedule'] = {'breaks': []}
+        self.assertEqual(default_overtime_windows(value), [{'start': '17:00', 'end': '18:00'}])
+
+    def test_legacy_policy_reproduces_frozen_lunch_windows(self):
+        from overtime import LEGACY_OT_POLICY
+        value = automatic_model([commit('13:00')])
+        value['overtime_review'].update(status='defaulted', policy=copy.deepcopy(LEGACY_OT_POLICY),
+                                      confirmed_windows=[{'start': '12:00', 'end': '13:00'}])
+        validate_review(value)
+        self.assertEqual(sum(b['duration_minutes'] for b in build_time_blocks(value)
+                             if b['work_type'] == 'OT'), 60)
 
     def test_midnight_clips_to_this_day(self):
         value = automatic_model([commit('00:30')])
@@ -311,7 +342,7 @@ class TestDefaultOTPipeline(unittest.TestCase):
     def test_v8_default_is_approved_and_assembles_without_question_or_collection(self):
         self.assertEqual(self.prepare(), (0, 3))
         frozen = read_snapshot(self.snapshot)
-        self.assertEqual(frozen['schema_version'], 8)
+        self.assertEqual(frozen['schema_version'], 9)
         self.assertEqual(frozen['normalized']['overtime_review']['status'], 'defaulted')
         self.profile.write_text('{invalid')
         self.assertEqual(self.invoke('--phase', 'assemble', '--snapshot', str(self.snapshot)), (0, 0))
@@ -401,7 +432,7 @@ class TestOTPipeline(unittest.TestCase):
 
     def test_pending_stops_assembly_and_model_call(self):
         self.assertEqual(self.prepare(), (0, 3))
-        self.assertEqual(read_snapshot(self.snapshot)['schema_version'], 7)
+        self.assertEqual(read_snapshot(self.snapshot)['schema_version'], 9)
         self.assertEqual(self.invoke('--phase', 'assemble', '--snapshot', str(self.snapshot)), (2, 0))
         self.assertFalse((self.output / f'{DATE}.json').exists())
         with patch('run_codex_summary.subprocess.run') as call, self.assertRaisesRegex(ValueError, 'pending'):

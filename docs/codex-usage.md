@@ -127,6 +127,13 @@ Unsupported schemas need a verified adapter, not fabricated values.
 
 ## Before/after benchmark
 
+The benchmark validates both outputs and compares original source intervals,
+evidence and metadata. With payload v5/v6, compact output may contain fewer rows
+because session grouping is enabled. `output_rows` reports both counts;
+`source_intervals_evidence_metadata_unchanged` verifies source equivalence while
+`intervals_evidence_metadata_unchanged` indicates whether the final row layouts
+also match. Grouping must conserve all original minutes and source evidence.
+
 Use one complete frozen snapshot and pin the same available model for both strategies:
 
 ```bash

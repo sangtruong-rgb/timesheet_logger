@@ -5,7 +5,11 @@ Morning-start shorthand uses `--work-day-start HH:MM`, which automatically enabl
 OT and defines main as start–12:00 plus 13:30–18:30.
 Main windows are NORMAL. The user's standing rule approves one estimated hour
 before each outside-main commit, using its minute-floored time as the end. Subtract
-main coverage, clip to the selected local day, and union overlapping OT intervals.
+main coverage and breaks, clip to the selected local day, and union overlapping
+OT intervals. New range runs exclude frozen profile breaks (default 12:00–13:30);
+morning-start shorthand excludes fixed 12:00–13:30 lunch regardless of profile
+breaks. A lunchtime commit alone does not establish work during lunch. Historical
+snapshots retain their recorded policy; explicit OT windows remain overrides.
 For example, with main ending 16:00, a commit at 18:00 creates 17:00–18:00;
 a commit at 16:20 contributes only 16:00–16:20. Never extend an OT window beyond
 its ending commit or fill gaps between separate hours.

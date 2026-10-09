@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT/'scripts'))
-from collect_token_usage import collect_run, parse_session_file, parse_transcript_line_usage, update_csv, main, daily_totals
+from collect_token_usage import collect_run, parse_transcript_line_usage, update_csv, main, daily_totals
 from token_settings import token_settings
 import test_remaining_storage as storage_fixture
 from save_timesheet import TimesheetReconciliationError, save_timesheet
@@ -65,7 +65,6 @@ class TestRunTokens(unittest.TestCase):
         a=self.line(); a['timestamp']='2026-10-06T23:59:00+07:00'
         b=self.line(id='b'); b['timestamp']='2026-10-07T00:01:00+07:00'
         self.write([a,b]); self.assertEqual(self.collect()['date'],'2026-10-06'); self.assertEqual(self.collect()['total_tokens'],250)
-        self.assertEqual(parse_session_file(self.transcript,'2026-10-07',self.zone)['total_tokens'],125)
 
     def test_non_usage_lines_do_not_discard_valid_records(self):
         self.write([self.line(), {'message':'text'}, {'response':[]}, [],self.line(id='strings',input='10',output='2',cache='3')])

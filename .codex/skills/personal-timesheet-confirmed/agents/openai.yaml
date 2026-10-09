@@ -1,0 +1,4 @@
+interface:
+  display_name: "Personal Timesheet Confirmed"
+  short_description: "Timesheet with declared attendance and OT approval"
+  default_prompt: "Use $personal-timesheet-confirmed with my supplied start time, OT confirmed, and attendance confirmed to create today's preview."

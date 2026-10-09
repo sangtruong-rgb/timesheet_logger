@@ -1,7 +1,7 @@
 # Timesheet improvement log
 
-This log supersedes the unmeasured claims in improvement-log-legacy.md. That file
-is a preserved historical artifact; 3,000–8,000 tokens, guaranteed <350 tokens and
+This log supersedes the unmeasured claims in improvement-log-legacy.md, retained
+in Git history; 3,000–8,000 tokens, guaranteed <350 tokens and
 zero-waste results are withdrawn. There was no transcript evidence for those claims.
 
 ## 2026-10-09 — configurable schedule and remaining token correctness cases

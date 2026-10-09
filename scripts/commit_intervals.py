@@ -6,9 +6,10 @@ or Calendar separates the pieces. It is completion evidence, not an assertion
 that the commit happened inside each piece. PR actions use ordinary [start,end)
 assignment; same-minute merges with a matching commit SHA use its allocation.
 Neither assignment generates additional minutes.
-Allocations with 1–19 work minutes merge backward before exclusions are split
-into rows. The first allocation, zero-work allocations and confirmed-end tails
-remain separate. Lunch/Calendar are never counted as development by a merge.
+Historical models merge 1–19 work-minute allocations backward before splitting.
+New pipeline models freeze a commit_grouping policy: resolve work identity from
+PR/ticket evidence, then group adjacent pieces after exclusions and work types
+are split. Confirmed-end tails remain separate in both versions.
 """
 import datetime
 import re
@@ -55,6 +56,12 @@ def build_commit_intervals(model, date, tz, unassigned, *, merge_short_commits=T
                            allocation_version=2, work_types=None, allow_minute_end_commits=False):
     from build_time_blocks import build_time_blocks, parse_dt, calculate_minutes
     from get_pr_activity import deduplicate_prs
+    from commit_groups import SUPPORTED_GROUPING_POLICIES
+    grouping = model.get('commit_grouping')
+    if grouping is not None and grouping not in SUPPORTED_GROUPING_POLICIES:
+        raise BlockIdentityError('Unsupported commit grouping policy')
+    if grouping:
+        merge_short_commits = False
 
     if type(short_commit_merge_minutes) is not int or short_commit_merge_minutes < 1:
         raise BlockIdentityError('Short commit merge threshold must be a positive integer')
@@ -279,4 +286,7 @@ def build_commit_intervals(model, date, tz, unassigned, *, merge_short_commits=T
         if 'work_schedule' in model:
             from copy import deepcopy
             block['work_schedule'] = deepcopy(schedule)
+    if grouping:
+        from commit_groups import group_adjacent_blocks
+        blocks = group_adjacent_blocks(blocks, policy=grouping)
     return blocks

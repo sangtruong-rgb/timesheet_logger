@@ -8,7 +8,7 @@ import io
 import json
 import sys
 from pathlib import Path
-from activity_settings import add_timezone_arguments, timezone_settings, day_bounds, parse_timestamp
+from activity_settings import add_timezone_arguments, timezone_settings, parse_timestamp
 from atomic_storage import directory_lock, atomic_write
 from token_settings import token_settings
 
@@ -123,17 +123,6 @@ def usage_records(path, start, end, message_ids=None):
 
 def make_record(date, key, counts, notes):
     return dict(zip(FIELDS, [date, key, *counts, sum(counts), notes]))
-
-
-def parse_session_file(file_path, target_date_str, tz=None):
-    """Legacy explicit session/day diagnostic; not a skill-run attribution method."""
-    tz = tz or timezone_settings()[1]
-    start, end = day_bounds(datetime.date.fromisoformat(target_date_str), tz)
-    selected, skipped = usage_records(file_path, start, end)
-    if not selected: return None
-    counts = tuple(sum(v[1][i] for v in selected.values()) for i in range(3))
-    return make_record(target_date_str, Path(file_path).stem, counts,
-                       f'Session-day diagnostic; timezone={getattr(tz,"key",str(tz))}; skipped={skipped}')
 
 
 def find_transcripts(base_dir):

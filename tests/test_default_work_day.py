@@ -45,7 +45,7 @@ class TestDefaultWorkDayPipeline(unittest.TestCase):
         profile_before = self.profile.read_bytes()
         self.assertEqual(self.prepare(), (0, 3))
         snapshot = read_snapshot(self.snapshot)
-        self.assertEqual(snapshot['schema_version'], 8)
+        self.assertEqual(snapshot['schema_version'], 9)
         self.assertEqual(snapshot['normalized']['work_confirmation']['windows'], WINDOWS)
         self.assertEqual(snapshot['normalized']['overtime_review']['confirmed_windows'],
                          [{'start': '06:30', 'end': '07:30'}])
@@ -78,15 +78,24 @@ class TestDefaultWorkDayPipeline(unittest.TestCase):
         self.assertEqual(self.prepare(), (0, 3))
         snapshot = read_snapshot(self.snapshot)
         self.assertEqual(snapshot['normalized']['overtime_review']['confirmed_windows'], [
-            {'start': '06:30', 'end': '07:30'}, {'start': '12:00', 'end': '12:20'},
+            {'start': '06:30', 'end': '07:30'},
             {'start': '18:30', 'end': '18:50'}])
         blocks = snapshot['blocks']
         self.assertEqual(sum(b['duration_minutes'] for b in blocks if b['work_type'] == 'NORMAL'), 510)
-        self.assertEqual(sum(b['duration_minutes'] for b in blocks if b['work_type'] == 'OT'), 100)
-        self.assertEqual(snapshot['unassigned_activity'], [])
+        self.assertEqual(sum(b['duration_minutes'] for b in blocks if b['work_type'] == 'OT'), 80)
+        self.assertTrue(snapshot['unassigned_activity'])
         for block in blocks:
-            if block['work_type'] == 'NORMAL':
-                self.assertTrue(block['end_time'] <= '12:00' or block['start_time'] >= '13:30')
+            self.assertTrue(block['end_time'] <= '12:00' or block['start_time'] >= '13:30')
+
+    def test_shorthand_excludes_lunch_even_with_profile_breaks_disabled(self):
+        profile = json.loads(self.profile.read_text())
+        profile['work_schedule'] = {'breaks': []}
+        self.profile.write_text(json.dumps(profile))
+        self.activities = [commit('13:09', 'lunch')]
+        self.assertEqual(self.prepare(), (0, 3))
+        snapshot = read_snapshot(self.snapshot)
+        self.assertEqual(snapshot['normalized']['overtime_review']['confirmed_windows'], [])
+        self.assertEqual(sum(b['duration_minutes'] for b in snapshot['blocks']), 510)
 
     def test_afternoon_end_commit_is_normal_not_ot(self):
         self.activities = [commit('18:30', 'closing')]

@@ -34,7 +34,7 @@ import datetime
 import json
 import sys
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional
 from block_identity import BlockIdentityError
 from activity_settings import resolve_timezone, timezone_settings
 from block_settings import CLUSTER_STRATEGY, COMMIT_STRATEGY, policy_from_model, SHORT_COMMIT_MERGE_MINUTES

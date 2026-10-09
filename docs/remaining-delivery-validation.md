@@ -18,7 +18,7 @@ Claude CLI is absent on this machine: actual discovery/invocation remains V01.
 F34: old timesheet, raw input/judgment, sample fixtures, private profile and old token
 CSV are unchanged. The unsupported empirical improvement claims are withdrawn from
 current improvement-log.md; its original bytes are preserved as the explicitly
-historical improvement-log-legacy.md. data/README.md quarantines mixed legacy data
+historical improvement-log-legacy.md (now retained in Git history). data/README.md documents retired mixed legacy data
 and labels the old demo token row. examples/synthetic is rebuilt with the current
 scripts and explicit DEMO provenance; its 180 proposed minutes comprise 90 scheduled
 and 90 estimated, with overlap coverage counted once. Synthetic token numbers are

@@ -311,7 +311,8 @@ class TestPipelineCommitIntervals(unittest.TestCase):
     def invoke(self, *args):
         def collector(command, source, mode):
             items = [{**activity, "author": "Tester"} for activity in self.activities] if source == "git" else []
-            return {"source": source, "mode": mode, "status": "success", "items": items}
+            return {"source": source, "mode": mode,
+                    "status": getattr(self, 'source_statuses', {}).get(source, 'success'), "items": items}
         argv = ["run_pipeline.py", "--date", DATE, "--config", str(self.profile), "--output-dir", str(self.output), *args]
         with patch.object(sys, "argv", argv), patch("run_pipeline.run_source_collector", side_effect=collector) as collect, \
                 contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
@@ -324,6 +325,18 @@ class TestPipelineCommitIntervals(unittest.TestCase):
     def test_missing_confirmation_fails_before_collection(self):
         self.assertEqual(self.invoke(), (2, 0))
         self.assertFalse(self.output.exists())
+
+    def test_demo_and_incomplete_runs_do_not_lookup_commit_prs(self):
+        self.activities = [commit('10:00', 'a' * 40)]
+        with patch('commit_groups.enrich_commit_prs', side_effect=AssertionError('Unexpected live lookup')):
+            self.assertEqual(self.invoke('--phase', 'prepare', '--snapshot', str(self.snapshot),
+                                         '--work-start', '09:00', '--prs-fixture', 'synthetic.json'), (0, 3))
+            snapshot = read_snapshot(self.root / 'demo' / self.snapshot.name)
+            self.assertEqual(snapshot['normalized']['commits'][0]['pr_association']['reason'], 'demo_source')
+            self.source_statuses = {'google_calendar': 'error'}
+            self.assertEqual(self.invoke('--phase', 'prepare', '--snapshot', str(self.snapshot),
+                                         '--work-start', '09:00'), (2, 3))
+            self.assertFalse(self.snapshot.exists())
 
     def test_prepare_assemble_freezes_hours_and_does_not_recollect(self):
         self.assertEqual(self.invoke("--phase", "prepare", "--snapshot", str(self.snapshot), "--work-start", "08:30", "--work-end", "11:00"), (0, 3))
@@ -348,18 +361,19 @@ class TestPipelineCommitIntervals(unittest.TestCase):
         self.assertEqual(rows[0]["entry"]["duration_minutes"], 90)
         self.assertEqual(rows[0]["estimation_policy"], {"strategy": "commit_intervals"})
 
-    def test_prepare_and_assemble_use_merged_commits_without_losing_sources(self):
+    def test_prepare_and_assemble_keep_unknown_pr_commits_separate_without_losing_sources(self):
         self.activities = [commit('10:00', 'a'), commit('10:10', 'b'), commit('10:25', 'c')]
         self.assertEqual(self.invoke('--phase', 'prepare', '--snapshot', str(self.snapshot), '--work-start', '09:00'), (0, 3))
         frozen = read_snapshot(self.snapshot)
-        self.assertEqual(frozen['schema_version'], 5)
-        self.assertEqual(intervals(frozen['blocks']), [('09:00', '10:25', 85)])
-        self.assertEqual(len(frozen['ai_input']['summary_request']['jobs']), 1)
+        self.assertEqual(frozen['schema_version'], 9)
+        self.assertEqual(intervals(frozen['blocks']), [('09:00', '10:00', 60), ('10:00', '10:10', 10), ('10:10', '10:25', 15)])
+        self.assertEqual(len(frozen['ai_input']['summary_request']['jobs']), 3)
+        self.assertEqual(frozen['collection']['commit_pr_associations']['unknown'], 3)
         self.assertEqual(self.invoke('--phase', 'assemble', '--snapshot', str(self.snapshot)), (0, 0))
         path = self.output / f'{DATE}.json'
         rows = json.loads(path.read_text())
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(len(rows[0]['sources']['commits']), 3)
+        self.assertEqual(len(rows), 3)
+        self.assertEqual({c['hash'] for r in rows for c in r['sources']['commits']}, {'a', 'b', 'c'})
         before = path.read_bytes()
         self.assertEqual(self.invoke('--phase', 'assemble', '--snapshot', str(self.snapshot)), (0, 0))
         self.assertEqual(path.read_bytes(), before)

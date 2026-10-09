@@ -17,7 +17,9 @@ credentials.json
 token.json
 client_secret*.json
 config/user-config.json
-data/raw/live/
+data/raw/
+data/timesheets/
+data/token-usage.csv
 data/audit/
 
 # macOS
@@ -28,11 +30,6 @@ data/audit/
 # Local logs & caches
 .cache/
 *.log
-
-# Explicit demo outputs and incomplete activity drafts
-data/timesheets/demo/
-data/timesheets/drafts/
-data/raw/demo/
 
 # Local transactional storage metadata (never publish rollback contents)
 .timesheet.lock

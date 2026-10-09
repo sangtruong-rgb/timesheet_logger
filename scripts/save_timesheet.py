@@ -17,7 +17,7 @@ import datetime
 import json
 import sys
 from pathlib import Path
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any
 from activity_review import REASONS, validate_unassigned_activity, unpack_activity_snapshot
 from atomic_storage import StorageError, directory_lock, write_bundle
 from output_paths import validate_auxiliary_output, OutputPathError
@@ -30,39 +30,6 @@ class TimesheetReconciliationError(ValueError):
 def get_entry_key(entry_item: Dict[str, Any]) -> str:
     e = entry_item.get("entry", {})
     return f"{e.get('date', '')}_{e.get('start', '')}_{e.get('end', '')}"
-
-
-def upsert_entries(
-    existing_items: List[Dict[str, Any]],
-    new_items: List[Dict[str, Any]]
-) -> Tuple[List[Dict[str, Any]], int, int]:
-    """
-    Legacy partial-merge utility; not used to persist daily snapshots.
-    Returns (merged_items, inserted_count, updated_count).
-    """
-    merged_map: Dict[str, Dict[str, Any]] = {}
-    for item in existing_items:
-        key = get_entry_key(item)
-        merged_map[key] = item
-
-    inserted = 0
-    updated = 0
-
-    for item in new_items:
-        key = get_entry_key(item)
-        if key in merged_map:
-            # Check if description or sources changed
-            if merged_map[key] != item:
-                merged_map[key] = item
-                updated += 1
-        else:
-            merged_map[key] = item
-            inserted += 1
-
-    # Sort merged entries by start time
-    sorted_items = list(merged_map.values())
-    sorted_items.sort(key=lambda x: x.get("entry", {}).get("start", ""))
-    return sorted_items, inserted, updated
 
 
 def render_markdown(date_str: str, items: List[Dict[str, Any]], collection_status=None, calendar_context=None,

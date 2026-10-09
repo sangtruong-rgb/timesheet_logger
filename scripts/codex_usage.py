@@ -103,7 +103,7 @@ def collect_codex_run(location, manifest, tz, *, expected_target=None,
         if {v.get('block_id') for v in judgments} != {v['block_id'] for v in snapshot['ai_input']['blocks']}:
             raise ValueError('Codex output must cover exactly the eligible AI blocks')
     if manifest['schema'] == 'codex_exec_run_v2' or attempt:
-        from run_codex_summary import summary_input, SUMMARY_INSTRUCTIONS
+        from run_codex_summary import summary_input, summary_instructions
         from summary_request import expand_judgments, serialize_request
         strategy = manifest.get('summary_strategy')
         request, mapping, prompt = summary_input(snapshot, strategy)
@@ -122,7 +122,7 @@ def collect_codex_run(location, manifest, tz, *, expected_target=None,
                 paths['request_file'].read_text(encoding='utf-8') != serialize_request(request) or
                 paths['prompt_file'].read_text(encoding='utf-8') != prompt):
             raise ValueError('Codex transmitted request conflicts with snapshot')
-        if mapping is not None and paths['instructions_file'].read_text(encoding='utf-8') != SUMMARY_INSTRUCTIONS:
+        if mapping is not None and paths['instructions_file'].read_text(encoding='utf-8') != summary_instructions(request):
             raise ValueError('Codex summary instructions differ')
         if not attempt:
             raw = json.loads(paths['response_file'].read_text(encoding='utf-8'))['judgments']

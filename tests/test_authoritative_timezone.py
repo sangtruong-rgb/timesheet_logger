@@ -20,7 +20,7 @@ from activity_settings import day_bounds, resolve_timezone, settings, timezone_s
 from normalize_activity import normalize_all
 from build_time_blocks import build_time_blocks
 from block_identity import BlockIdentityError
-from collect_token_usage import parse_session_file
+from collect_token_usage import collect_run
 from get_calendar_activity import normalize_calendar_event, fetch_google_calendar_events, collect_calendar_activity
 from get_git_activity import filter_commits, normalize_api_commits
 from get_pr_activity import query_gh_prs
@@ -175,18 +175,26 @@ class TestTokenLocalDay(unittest.TestCase):
 
     def write(self,items):self.path.write_text('\n'.join(json.dumps(item) for item in items))
 
+    def collect_day(self, date, tz):
+        start, end = day_bounds(datetime.date.fromisoformat(date), tz)
+        manifest = self.path.parent / 'run.json'
+        manifest.write_text(json.dumps({'run_id': 'timezone-test', 'target_date': date,
+                                       'session_file': str(self.path),
+                                       'started_at': start.isoformat(), 'ended_at': end.isoformat()}))
+        return collect_run(manifest, tz)
+
     def test_same_transcript_is_split_by_actual_local_day_not_relabelled(self):
         self.write([{'timestamp':'2026-10-07T03:59:59Z','usage':{'input_tokens':10,'output_tokens':0,'cache_read_input_tokens':0,'cache_creation_input_tokens':0}},
                     {'timestamp':'2026-10-07T04:00:00Z','usage':{'input_tokens':20,'output_tokens':0,'cache_read_input_tokens':0,'cache_creation_input_tokens':0}},
                     {'timestamp':'2026-10-08T04:00:00Z','usage':{'input_tokens':30,'output_tokens':0,'cache_read_input_tokens':0,'cache_creation_input_tokens':0}}])
-        self.assertEqual(parse_session_file(self.path,'2026-10-06',NY)['input_tokens'],10)
-        self.assertEqual(parse_session_file(self.path,'2026-10-07',NY)['input_tokens'],20)
-        self.assertIn('America/New_York',parse_session_file(self.path,'2026-10-07',NY)['notes'])
+        self.assertEqual(self.collect_day('2026-10-06',NY)['input_tokens'],10)
+        self.assertEqual(self.collect_day('2026-10-07',NY)['input_tokens'],20)
+        self.assertIn('America/New_York',self.collect_day('2026-10-07',NY)['notes'])
 
     def test_f23_original_cross_day_reproduction_is_22_not_132_tokens(self):
         self.write([{'timestamp':'2026-10-05T03:00:00Z','usage':{'input_tokens':100,'output_tokens':10,'cache_read_input_tokens':0,'cache_creation_input_tokens':0}},
                     {'timestamp':'2026-10-06T03:00:00Z','usage':{'input_tokens':20,'output_tokens':2,'cache_read_input_tokens':0,'cache_creation_input_tokens':0}}])
-        result=parse_session_file(self.path,'2026-10-06',ZoneInfo('Asia/Ho_Chi_Minh'))
+        result=self.collect_day('2026-10-06',ZoneInfo('Asia/Ho_Chi_Minh'))
         self.assertEqual(result['total_tokens'],22)
         self.assertEqual(result['input_tokens'],20)
         self.assertEqual(result['output_tokens'],2)
@@ -195,19 +203,20 @@ class TestTokenLocalDay(unittest.TestCase):
         self.write([{'timestamp':'2026-11-01T01:30:00-04:00','usage':{'input_tokens':10,'output_tokens':0,'cache_read_input_tokens':0,'cache_creation_input_tokens':0}},
                     {'timestamp':'2026-11-01T01:30:00-05:00','usage':{'input_tokens':20,'output_tokens':0,'cache_read_input_tokens':0,'cache_creation_input_tokens':0}},
                     {'timestamp':'2026-11-02T00:00:00-05:00','usage':{'input_tokens':30,'output_tokens':0,'cache_read_input_tokens':0,'cache_creation_input_tokens':0}}])
-        self.assertEqual(parse_session_file(self.path,'2026-11-01',NY)['input_tokens'],30)
+        self.assertEqual(self.collect_day('2026-11-01',NY)['input_tokens'],30)
 
     def test_missing_invalid_naive_timestamps_are_not_assigned_to_requested_date(self):
         self.write([{'usage':{'input_tokens':10,'output_tokens':0,'cache_read_input_tokens':0,'cache_creation_input_tokens':0}}, {'timestamp':'bad','usage':{'input_tokens':20,'output_tokens':0,'cache_read_input_tokens':0,'cache_creation_input_tokens':0}},
                     {'timestamp':'2026-10-07T12:00:00','usage':{'input_tokens':30,'output_tokens':0,'cache_read_input_tokens':0,'cache_creation_input_tokens':0}}])
         with self.assertRaisesRegex(ValueError,'valid timestamp'):
-            parse_session_file(self.path,'2026-10-07',NY)
+            self.collect_day('2026-10-07',NY)
 
     def test_file_mtime_does_not_determine_usage_date(self):
         self.write([{'timestamp':'2026-01-01T15:00:00Z','usage':{'input_tokens':10,'output_tokens':0,'cache_read_input_tokens':0,'cache_creation_input_tokens':0}}])
         os.utime(self.path,(0,0))
-        self.assertEqual(parse_session_file(self.path,'2026-01-01',NY)['input_tokens'],10)
-        self.assertIsNone(parse_session_file(self.path,'2026-01-02',NY))
+        self.assertEqual(self.collect_day('2026-01-01',NY)['input_tokens'],10)
+        with self.assertRaisesRegex(ValueError, 'No attributed usage'):
+            self.collect_day('2026-01-02',NY)
 
 class TestStandaloneTimezoneCLI(unittest.TestCase):
     def setUp(self):

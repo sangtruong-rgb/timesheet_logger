@@ -4,7 +4,6 @@ test_token_usage.py - Unit tests for Claude transcript parsing and token aggrega
 """
 
 import csv
-import json
 import tempfile
 import unittest
 import sys
@@ -12,7 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
-from collect_token_usage import parse_transcript_line_usage, parse_session_file, update_csv
+from collect_token_usage import parse_transcript_line_usage, update_csv
 
 
 class TestTokenUsage(unittest.TestCase):

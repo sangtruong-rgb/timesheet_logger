@@ -83,6 +83,21 @@ uses the noon / five-hour afternoon default with OT. Specify another date or
 custom hours in plain language when needed;
 publishing to Gradion requires an explicit request.
 
+For supplied OT and attendance confirmations, use
+`$personal-timesheet-confirmed 9:00` inside Codex, or launch:
+
+```bash
+./bin/personal-timesheet-codex "9:00, OT confirmed, attendance confirmed"
+```
+
+The [confirmed timesheet skill](.codex/skills/personal-timesheet-confirmed/SKILL.md)
+records the declarations for that date/run in `confirmations.json` and uses them
+in its report and any explicitly requested publishing. It does not reconfirm
+covered completed meetings or approved OT. Future meetings remain scheduled;
+conflicts still need resolution. Generated Python attendance labels stay unchanged
+because the assembler does not yet consume this separate receipt. Bare shorthand
+still requests a preview.
+
 The launcher starts a fresh Codex session in this repository with network access
 enabled and approval policy `on-request`. It uses `danger-full-access` because the
 standard workspace sandbox cannot read the host GitHub credential store. Review
@@ -117,6 +132,11 @@ output/profile/repository paths when invoked from another project. Invalid expli
 settings fail; they never fall back to a guessed identity or host timezone.
 
 ## Prepare, summarize, assemble
+
+For short commands that run each stage and display its output, use
+[`bin/timesheet-steps`](docs/workflow-steps.md). It exposes source evidence, blocks,
+the actual compact AI request, summary output, usage and final Markdown, with a
+separate console log per stage. Only its `summary` command calls AI.
 
 ```bash
 python3 scripts/run_pipeline.py --phase prepare --date 2026-10-07 \
@@ -178,13 +198,16 @@ clock overrides. Changed hours require a new snapshot.
 - Subtract configured breaks (default **12:00–13:30**) and the union of scheduled Calendar intervals.
   A crossing interval becomes separate rows. Calendar rows remain scheduled,
   attendance-unconfirmed proposals, including lunch/future events.
-- If a commit allocation has **1–19 work minutes after these exclusions**, merge
-  it into the previous commit allocation, retaining every commit and PR. Consecutive
-  short allocations merge backward into the same group. The first allocation stays
-  separate when there is no predecessor; 20 minutes or more stays separate. A
-  zero-work allocation stays separate for Calendar/review assignment. A confirmed-end
-  tail is not a commit allocation and does not merge. Apply this rule before splitting
-  at lunch/Calendar: a short piece of a longer allocation does not trigger a merge.
+- New pipeline runs resolve each commit's GitHub PR associations and merge only
+  adjacent development pieces with exactly one common repository-qualified PR.
+  With a successful empty PR lookup, one shared ticket in the same repository
+  also permits merging. Unknown lookups, multiple PRs/tickets and unlabelled
+  commits remain separate; short duration alone never permits merging.
+- Group after splitting around breaks, Calendar and NORMAL/OT boundaries. Keep
+  confirmed-end tails separate. Same-minute commits still share a timing boundary;
+  conflicting work identities in that minute are not guessed or subdivided.
+- Snapshot v9 freezes `adjacent_pr_or_ticket_v1` and the lookup results. V1–v8
+  replay their previous rules, including historical short-allocation merging.
 - Additional breaks can be configured; no idle-gap splitting, padding to 20 minutes or 90-minute cap.
   The confirmed start can be outside the old 09:00–17:30 work windows; no OT label
   is inferred. This strategy assumes continuous work between commit boundaries.
@@ -208,12 +231,12 @@ Example: start 09:00, commits 10:10 / 11:40 / 14:10 / 16:00, no Calendar:
 13:30–14:10 (40m), 14:10–16:00 (110m). Total: **330m proposed**.
 Confirmed hours and allocation metadata survive into the final JSON. Development
 remains `estimated`: commit boundaries allocate time, not measure task duration.
-For example, commits at 10:00 / 10:10 / 10:25 become one 09:00–10:25 row (85m),
-containing all three commits. New pipeline snapshots use schema v5 to freeze the work
-schedule as well as stable allocation groups and merge-commit associations. V4 retains
-the default schedule and its previous allocation behavior. V3 retains the previous under-20-minute rule;
-v2 retains under-30-minute merging and v1 retains unmerged intervals. Changed allocations require
-a new prepare snapshot.
+For example, commits at 10:00 / 10:10 / 10:25 that resolve to the same PR become
+one 09:00–10:25 row (85m), containing all three commits. New pipeline snapshots use
+schema v9 to freeze PR associations and grouping, with payload v6 for session
+summaries. Earlier schemas retain their original rules: v8 default OT, v7 manual
+OT review, v6 daily windows, v5 profile schedules and older allocation/short-commit
+merging policies. Changed allocations or grouping requests require a new prepare.
 
 ### Configurable work schedule
 
@@ -293,6 +316,21 @@ or scheduled calendar activity; original titles/messages remain in `sources`.
 Calendar attendance remains unconfirmed. Existing saved logs are not rewritten.
 
 ## Token usage
+
+New commit-based runs use AI payload v6 to group related adjacent work sessions in the
+same measured summary call. Python first groups verified PR/ticket intervals,
+then provides opaque `merge_candidates` to AI. The model may combine different
+PRs or commits without PRs when their content supports a shared workflow or
+deliverable. Related implementation, tests, reporting and integration can share a
+session; merge-only jobs join related adjacent work. Unrelated objectives stay
+separate. Python rejects gaps, meetings, different repositories/work types, altered
+coverage and new groups over four hours. Confirmed-end tails remain separate.
+Each accepted group gets a concise description and a script-generated union of
+PR references; final JSON retains `source_block_ids` and original allocations.
+Run `./bin/timesheet-steps show "$TS_RUN" grouping` after summary to review the
+before/after rows. Start a fresh prepare run to use v6; older snapshots (including
+v5's task-level grouping) retain their frozen payload and instructions. Without AI,
+only deterministic PR/ticket grouping applies.
 
 Payload v3 exports an audit envelope plus a compact `summary_request`. Text is stored
 once and referenced by summary jobs. Pieces of one commit allocation split by
